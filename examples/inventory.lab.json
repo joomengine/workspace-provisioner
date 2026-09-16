@@ -1,0 +1,21 @@
+{
+  "hosts": {
+    "lab": {
+      "remote": "local",
+      "project": "jcb-lab",
+      "network": "jcb-lab",
+      "storage": "default",
+      "bridge_address": "10.77.0.1/24",
+      "addresses": ["10.77.0.10", "10.77.0.11"],
+      "ingress": ["192.0.2.10/32"],
+      "dns": ["1.1.1.1", "9.9.9.9"],
+      "denied": [],
+      "cpu_budget": 4,
+      "memory_mib_budget": 8192,
+      "disk_gib_budget": 60
+    }
+  },
+  "profiles": {
+    "standard": {"cpu": 2, "memory_mib": 4096, "disk_gib": 30, "network_mbit": 20, "io_mib": 30}
+  }
+}

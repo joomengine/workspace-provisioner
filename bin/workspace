@@ -1,0 +1,149 @@
+#!/usr/bin/env php
+<?php
+
+declare(strict_types=1);
+
+require dirname(__DIR__) . '/bootstrap.php';
+
+use JoomEngine\Workspace\{Application, Config, Fault, Files, Json, PgStore, Request, Validate};
+
+function options(array $arguments, array $required, array $optional = []): array
+{
+    $result = [];
+    for ($i = 0; $i < count($arguments); ++$i) {
+        $key = $arguments[$i];
+        if (!str_starts_with($key, '--') || !in_array(substr($key, 2), [...$required, ...$optional], true)) {
+            throw new Fault('invalid_option', 'Unknown command option. Use help for the supported interface.');
+        }
+        $key = substr($key, 2);
+        if (isset($result[$key])) { throw new Fault('invalid_option', 'Duplicate command option.'); }
+        if ($key === 'once') { $result[$key] = true; continue; }
+        if (!isset($arguments[$i + 1]) || str_starts_with($arguments[$i + 1], '--')) {
+            throw new Fault('invalid_option', 'Missing option value.');
+        }
+        $result[$key] = $arguments[++$i];
+    }
+    if (array_diff($required, array_keys($result))) { throw new Fault('invalid_option', 'Required options are missing.'); }
+    return $result;
+}
+
+try {
+    $command = $argv[1] ?? 'help';
+    $args = array_slice($argv, 2);
+    $root = dirname(__DIR__);
+    if ($command === 'help' || $command === '--help') {
+        echo <<<'HELP'
+JoomEngine Workspace Provisioner
+
+All configuration paths must be absolute. Commands run with the trusted operator's OS authority.
+A caller label is an authorization scope, not an authentication credential.
+
+configure --directory DIR --inventory FILE --catalog FILE --incus-config DIR [--incus-binary FILE]
+validate --config FILE
+state:migrate --config FILE
+host:preflight --config FILE --host NAME
+host:prepare --config FILE --host NAME --confirm INSTALLATION_UUID
+submit --config FILE --caller NAME < request.json
+worker --config FILE [--once]
+status --config FILE --caller NAME --operation UUID
+retry --config FILE --caller NAME --operation UUID
+credentials --config FILE --caller NAME --workspace UUID --output FILE
+
+configure creates a local file-backed store and a new encryption key in an empty owner-only directory.
+For operational PostgreSQL, update the private state settings and run state:migrate before submitting work.
+worker --once executes one pending operation; without --once it reloads configuration between operations.
+credentials writes once-only administrator details to a NEW mode-0600 file, never to ordinary stdout.
+Public DNS, payment, and firewall publication are outside this interface.
+
+HELP;
+        exit(0);
+    }
+    if ($command === 'configure') {
+        $o = options($args, ['directory', 'inventory', 'catalog', 'incus-config'], ['incus-binary']);
+        $directory = Validate::path($o['directory']);
+        if (file_exists($directory) || is_link($directory)) { throw new Fault('already_exists', 'Use a new empty configuration directory.'); }
+        Files::protectedPath($directory);
+        $inventory = Validate::object(Json::decode(Files::readPrivate($o['inventory'])), ['hosts', 'profiles']);
+        $catalog = Json::decode(Files::readPrivate($o['catalog']));
+        $config = ['version' => 1, 'installation_id' => Json::uuid(), 'state' => ['driver' => 'file', 'path' => $directory . '/state.json'],
+            'vault' => ['directory' => $directory . '/credentials', 'key_file' => $directory . '/master.key'],
+            'incus' => ['binary' => $o['incus-binary'] ?? '/usr/bin/incus', 'config_directory' => Validate::path($o['incus-config'])],
+            'hosts' => $inventory['hosts'], 'profiles' => $inventory['profiles'], 'catalog' => $catalog,
+            'callers' => ['operator' => ['tenants' => ['*'], 'actions' => [...Request::ACTIONS, 'status', 'credentials', 'retry']]],
+            'recipe_secrets' => $directory . '/recipe-secrets', 'backup_directory' => $directory . '/backups'];
+        new Config($config);
+        if (!mkdir($directory, 0700)) { throw new Fault('directory_failed', 'Unable to create configuration directory.'); }
+        foreach (['credentials', 'recipe-secrets', 'backups'] as $name) { mkdir($directory . '/' . $name, 0700); }
+        Files::write($directory . '/master.key', bin2hex(random_bytes(32)) . "\n");
+        Files::write($directory . '/operator.json', Json::encode($config));
+        echo Json::encode(['configuration' => $directory . '/operator.json', 'installation_id' => $config['installation_id']]);
+        exit(0);
+    }
+    $required = match ($command) {
+        'validate', 'state:migrate', 'worker' => ['config'],
+        'host:preflight' => ['config', 'host'],
+        'host:prepare' => ['config', 'host', 'confirm'],
+        'submit' => ['config', 'caller'],
+        'status', 'retry' => ['config', 'caller', 'operation'],
+        'credentials' => ['config', 'caller', 'workspace', 'output'],
+        default => throw new Fault('invalid_command', 'Unknown command. Run help.'),
+    };
+    $o = options($args, $required, $command === 'worker' ? ['once'] : []);
+    $config = Config::load($o['config']);
+    if ($command === 'validate') {
+        foreach (array_keys($config->data['catalog']) as $catalog) { $config->recipe($catalog); }
+        echo Json::encode(['valid' => true, 'version' => 1]);
+        exit(0);
+    }
+    if ($command === 'state:migrate') {
+        $s = $config->data['state'];
+        if ($s['driver'] === 'pgsql') {
+            (new PgStore(new PDO($s['dsn'], $s['username'], rtrim(Files::readPrivate($s['password_file']), "\r\n"))))->migrate();
+        }
+        new Application($config, $root);
+        echo Json::encode(['initialized' => true]);
+        exit(0);
+    }
+    $application = new Application($config, $root);
+    $result = match ($command) {
+        'host:preflight' => $application->host->preflight($o['host']),
+        'host:prepare' => $application->store->exclusive(fn () => $application->host->prepare($o['host'], $o['confirm'])),
+        'submit' => $application->submit($o['caller'], Json::decode(stream_get_contents(STDIN, 8388609))),
+        'status' => $application->journal->status($o['caller'], $o['operation']),
+        'retry' => $application->journal->retry($o['caller'], $o['operation']),
+        default => null,
+    };
+    if ($command === 'credentials') {
+        $output = Validate::path($o['output']);
+        Files::protectedPath($output);
+        if (file_exists($output) || is_link($output)) { throw new Fault('already_exists', 'Credential output must be a new file.'); }
+        $old = umask(0077);
+        $handle = fopen($output, 'xb');
+        umask($old);
+        if ($handle === false) { throw new Fault('file_write_failed', 'Unable to reserve credential output.'); }
+        try {
+            $data = Json::encode($application->credentials($o['caller'], $o['workspace']));
+            if (fwrite($handle, $data) !== strlen($data) || !fflush($handle) || !fsync($handle)) {
+                throw new Fault('file_write_failed', 'Credential output failed after one-time retrieval; use administrator recovery.');
+            }
+        } finally { fclose($handle); }
+        $result = ['written' => true];
+    }
+    if ($command === 'worker') {
+        do {
+            $application = new Application(Config::load($o['config']), $root);
+            try { $result = $application->engine->tick(); } catch (Fault $error) {
+                if ($error->reason !== 'busy' || isset($o['once'])) { throw $error; }
+                $result = null;
+            }
+            echo Json::encode($result ?? ['idle' => true]);
+            if (isset($o['once'])) { exit(($result['status'] ?? '') === 'failed' ? 1 : 0); }
+            if ($result === null) { sleep(2); }
+        } while (true);
+    }
+    echo Json::encode($result);
+} catch (Throwable $error) {
+    fwrite(STDERR, Json::encode(['error' => $error instanceof Fault ? $error->reason : 'internal_error',
+        'message' => $error instanceof Fault ? $error->getMessage() : 'Operation failed; private diagnostic output was suppressed.']));
+    exit(1);
+}
