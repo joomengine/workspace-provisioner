@@ -1,0 +1,19 @@
+[Unit]
+Description=JCB workspace containers
+Requires=docker.service
+After=docker.service network-online.target
+Wants=network-online.target
+ConditionPathExists=/opt/jcb-workspace/handed-over
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+WorkingDirectory=/opt/jcb-workspace
+ExecStart=/usr/bin/docker compose --project-name jcb-workspace -f /opt/jcb-workspace/compose.json up -d --wait --wait-timeout 300 database web development
+ExecStop=/usr/bin/docker compose --project-name jcb-workspace -f /opt/jcb-workspace/compose.json stop --timeout 30
+TimeoutStartSec=360
+TimeoutStopSec=120
+UMask=0077
+
+[Install]
+WantedBy=multi-user.target
