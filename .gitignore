@@ -1,0 +1,20 @@
+/vendor/
+/var/
+/build/
+/artifacts/
+/.env
+/.env.*
+/.phpunit.cache/
+/phpstan-cache/
+*.pem
+*.key
+*.p12
+*.qcow2
+*.img
+*.tar.gz
+*.tar.zst
+*.sql
+*.dump
+composer.phar
+# Keep real operator configuration outside the checkout; this is not a security boundary.
+/local/
