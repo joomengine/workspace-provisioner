@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1
 ARG COMPOSER_IMAGE
 ARG JCB_IMAGE
 FROM ${COMPOSER_IMAGE} AS composer

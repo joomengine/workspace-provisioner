@@ -21,7 +21,7 @@ final class Compose
             'volumes' => [$site, $probe], 'ports' => [$workspace['address'] . ':80:80'],
             'networks' => ['application', 'database'], 'depends_on' => ['database' => ['condition' => 'service_healthy']],
             'tmpfs' => ['/tmp:rw,nosuid,nodev,size=256m,mode=1777', '/var/run/apache2:rw,nosuid,nodev,size=8m', '/var/lock/apache2:rw,nosuid,nodev,size=8m'],
-            'cap_drop' => ['ALL'], 'cap_add' => ['SETUID', 'SETGID', 'NET_BIND_SERVICE', 'KILL'],
+            'cap_drop' => ['ALL'], 'cap_add' => ['SETUID', 'SETGID', 'NET_BIND_SERVICE', 'KILL', 'CHOWN'],
             'mem_limit' => (int) floor($limit * 0.45) . 'm'];
         $database = $common + ['image' => $catalog['database_image'],
             'environment' => ['MARIADB_DATABASE' => 'joomla', 'MARIADB_USER' => 'joomla',
