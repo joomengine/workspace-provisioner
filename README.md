@@ -29,3 +29,9 @@ No customer portal, billing, public DNS automation, or production firewall publi
 ## License
 
 Apache-2.0; see [LICENSE](LICENSE). Upstream software and container images retain their respective licenses.
+
+## Operator and developer entry points
+
+Run `php bin/workspace help` for the service/CLI interface. Start with [external configuration](docs/configuration.md), [development setup](docs/development.md), [security boundaries](docs/security.md), and [qualification evidence](docs/qualification.md). [Release automation](docs/releases.md) documents semantic versions, installable archives, Composer metadata and the stable `latest` channel.
+
+Production image selectors, private initialization recipes and workspace Composer files belong in external operator configuration. A configured container tag such as `latest` is resolved once per new workspace and stored as an exact digest. Restart/retry does not silently upgrade existing workspaces. Generated Compose definitions preserve the platform's security policy; arbitrary Compose overrides are not accepted.
