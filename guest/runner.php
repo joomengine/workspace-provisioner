@@ -92,6 +92,26 @@ try {
                 $ready('web');
             }
             break;
+        case 'composer':
+        case 'composer-cleanup':
+            $cleanup = static function () use ($process): void {
+                $result = $process->run(['/usr/bin/docker', 'container', 'ls', '-a', '--filter', 'name=^/jcb-workspace-composer$', '--format', '{{.ID}}']);
+                if ($result['exit'] !== 0) { throw new Fault('composer_cleanup_failed', 'Unable to inspect the temporary dependency container.'); }
+                if (trim($result['stdout']) !== '') {
+                    $process->requireSuccess(['/usr/bin/docker', 'rm', '--force', 'jcb-workspace-composer']);
+                }
+            };
+            $cleanup();
+            if ($action === 'composer-cleanup') { break; }
+            if (is_file(ROOT . '/handed-over')) { throw new Fault('handed_over', 'Dependency bootstrap is forbidden after handover.'); }
+            $payload = Json::decode(stream_get_contents(STDIN, 1048577));
+            $timeout = Validate::integer($payload['timeout'] ?? null, 1, 1800);
+            try {
+                $result = Json::decode($compose(['run', '--rm', '--no-deps', '-T', '--name', 'jcb-workspace-composer', 'composer'],
+                    Json::encode($payload), $timeout));
+                if (($result['installed'] ?? false) !== true) { throw new Fault('composer_incomplete', 'Dependency installation was not verified.'); }
+            } finally { $cleanup(); }
+            break;
         case 'start':
             $compose(['up', '-d', '--wait', '--wait-timeout', '300', 'database', 'web', 'development'], '', 360);
             break;

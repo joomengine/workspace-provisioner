@@ -6,7 +6,7 @@ namespace JoomEngine\Workspace;
 
 final readonly class Engine
 {
-    public function __construct(private Config $config, private Journal $journal, private Runtime $runtime, private Vault $vault)
+    public function __construct(private Config $config, private Journal $journal, private Runtime $runtime, private Vault $vault, private ?ImageResolver $imageResolver = null)
     {
     }
 
@@ -122,6 +122,13 @@ final readonly class Engine
 
     private function create(string $id, array $workspace): void
     {
+        if (!isset($workspace['resolved_images'])) {
+            $this->stage($id, 'resolving-images');
+            $images = ($this->imageResolver ?? new ImageResolver($this->config->data['image_resolver'] ?? []))
+                ->resolve($this->config->data['catalog'][$workspace['catalog']]);
+            $this->journal->change($id, static function (array &$o, array &$w) use ($images): void { $w['resolved_images'] = $images; });
+            $workspace['resolved_images'] = $images;
+        }
         $this->stage($id, 'provisioning');
         $this->runtime->ensure($workspace, function (string $remoteOperation) use ($id): void {
             $this->journal->change($id, static function (array &$o, array &$w) use ($remoteOperation): void { $o['remote_operation'] = $remoteOperation; });

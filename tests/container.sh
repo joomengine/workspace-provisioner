@@ -18,6 +18,13 @@ cleanup() {
 trap cleanup EXIT
 mkdir -p "$work"/{data/{site,database,home,build},control/{authorized-keys,host-keys,secrets}}
 chmod 0755 "$work/data" "$work/data/site" "$work/control/authorized-keys"
+mkdir -p "$work/control/lib/src"
+cp "$root/bootstrap.php" "$work/control/lib/bootstrap.php"
+cp "$root/src/"{Fault,Files,Json,Process,Validate}.php "$work/control/lib/src/"
+chmod 0755 "$work/control/lib" "$work/control/lib/src"
+chmod 0644 "$work/control/lib/bootstrap.php" "$work/control/lib/src/"*.php
+cp "$root/guest/composer-install.php" "$work/control/composer-install.php"
+chmod 0644 "$work/control/composer-install.php"
 cp "$root/guest/install.sh" "$root/guest/probe.php" "$work/control/"
 chmod 0644 "$work/control/"{install.sh,probe.php}
 ssh-keygen -q -t ed25519 -N '' -f "$work/client"
@@ -30,9 +37,10 @@ resolve() {
     docker pull "$1" >&2
     docker image inspect --format '{{index .RepoDigests 0}}' "$1"
 }
-jcb=$(resolve "${WP_TEST_JCB_IMAGE:-octoleo/joomengine:latest}")
-database=$(resolve "${WP_TEST_DATABASE_IMAGE:-mariadb:11.4}")
-composer=$(resolve "${WP_TEST_COMPOSER_IMAGE:-composer:2}")
+php "$root/tests/resolve-images.php" "${WP_TEST_JCB_IMAGE:-octoleo/joomengine:latest}" "${WP_TEST_DATABASE_IMAGE:-mariadb:11.4}" "${WP_TEST_COMPOSER_IMAGE:-composer:2}" > "$work/images.json"
+jcb=$(resolve "$(jq -r .jcb_image "$work/images.json")")
+database=$(resolve "$(jq -r .database_image "$work/images.json")")
+composer=$(resolve "$(jq -r .development_image "$work/images.json")")
 development="$project:development"
 docker build --build-arg "JCB_IMAGE=$jcb" --build-arg "COMPOSER_IMAGE=$composer" --tag "$development" "$root/images/development"
 php "$root/tests/render-compose.php" "$work" "$jcb" "$database" "$development" bootstrap > "$work/compose.json"
@@ -49,6 +57,13 @@ for ((i=0; i<180; i++)); do
 done
 [[ $ready == true ]] || { echo 'Initial JCB readiness failed; private installer output was not printed.' >&2; exit 1; }
 "${compose[@]}" rm --stop --force installer
+php "$root/tests/composer-payload.php" > "$work/composer-input.json"
+"${compose[@]}" run --rm --no-deps -T composer < "$work/composer-input.json" > "$work/composer-result.json"
+jq -e '.installed == true' "$work/composer-result.json" >/dev/null
+# Repeating a lock-based install is safe and does not update dependencies.
+"${compose[@]}" run --rm --no-deps -T composer < "$work/composer-input.json" > /dev/null
+[[ -f $work/data/site/libraries/workspace-test/vendor/autoload.php ]]
+rm "$work/composer-input.json" "$work/composer-result.json"
 php "$root/tests/render-compose.php" "$work" "$jcb" "$database" "$development" normal > "$work/compose.next.json"
 mv "$work/compose.next.json" "$work/compose.json"
 rm -f "$work/control/secrets/"{admin_password,admin_username}

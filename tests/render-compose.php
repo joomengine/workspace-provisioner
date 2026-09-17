@@ -10,7 +10,7 @@ if ($argc !== 6) { fwrite(STDERR, "Usage: render-compose.php PRIVATE_TEST_DIRECT
 $directory = Validate::path($argv[1]);
 if (!str_contains(basename($directory), 'wp-container-') || !in_array($argv[5], ['bootstrap', 'normal'], true)) { exit(2); }
 $catalog = ['jcb_image' => Validate::image($argv[2]), 'database_image' => Validate::image($argv[3]),
-    'development_image' => Validate::text($argv[4]), 'uid' => 33, 'gid' => 33];
+    'development_image' => Validate::text($argv[4]), 'uid' => 33, 'gid' => 33, 'composer' => []];
 $workspace = ['address' => '127.0.0.1', 'admin_email' => 'developer@example.test', 'resources' => ['memory_mib' => 4096]];
 $definition = Compose::render($workspace, $catalog, $argv[5] === 'bootstrap');
 foreach ($definition['services'] as $name => &$service) {

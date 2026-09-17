@@ -58,6 +58,17 @@ final class Compose
                     'APACHE_RUN_USER' => '#' . $catalog['uid'], 'APACHE_RUN_GROUP' => '#' . $catalog['gid']],
                 'secrets' => ['database-password', 'admin-password', 'admin-username']];
             $services['installer']['restart'] = 'no';
+            if (isset($catalog['composer'])) {
+                $services['composer'] = $common + ['image' => $catalog['development_image'],
+                    'profiles' => ['bootstrap'], 'user' => $catalog['uid'] . ':' . $catalog['gid'],
+                    'read_only' => true, 'entrypoint' => ['/usr/local/bin/php', '/opt/wp/composer-install.php'],
+                    'command' => [], 'working_dir' => '/var/www/html', 'cap_drop' => ['ALL'],
+                    'networks' => ['application'], 'mem_limit' => (int) floor($limit * 0.4) . 'm',
+                    'tmpfs' => ['/tmp:rw,nosuid,nodev,size=512m,mode=1777'],
+                    'volumes' => [$site, self::mount($base . '/composer-install.php', '/opt/wp/composer-install.php', true),
+                        self::mount($base . '/lib', '/opt/wp/lib', true)]];
+                $services['composer']['restart'] = 'no';
+            }
             $secrets['admin-password'] = ['file' => $base . '/secrets/admin_password'];
             $secrets['admin-username'] = ['file' => $base . '/secrets/admin_username'];
         }

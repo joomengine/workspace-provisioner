@@ -61,3 +61,34 @@ test('lifecycle preserves handover, resumes failures and terminates access', fun
         rmdir($dir);
     }
 });
+
+test('resolved latest images remain pinned across an interrupted installation', function (): void {
+    $dir = sys_get_temp_dir() . '/jcb-images-' . bin2hex(random_bytes(8));
+    mkdir($dir, 0700);
+    try {
+        Files::write($dir . '/key', bin2hex(random_bytes(32)));
+        $data = fixtureConfig($dir)->data;
+        foreach (['jcb_image', 'database_image', 'development_image'] as $key) { $data['catalog']['standard'][$key] = 'example/' . str_replace('_', '-', $key) . ':latest'; }
+        $cfg = new JoomEngine\Workspace\Config($data);
+        $journal = new Journal(new FileStore($dir . '/state.json'), $cfg);
+        $reads = 0;
+        $resolver = new JoomEngine\Workspace\ImageResolver([], static function () use (&$reads): string {
+            return Json::encode(['schemaVersion' => 2, 'manifests' => [], 'generation' => ++$reads]);
+        });
+        $runtime = new MemoryRuntime();
+        $engine = new Engine($cfg, $journal, $runtime, new Vault($dir, $dir . '/key'), $resolver);
+        $request = fixtureRequest();
+        $op = $journal->submit('operator', new Request($request));
+        $runtime->failure = 'initialize';
+        same('failed', $engine->tick()['status']);
+        $images = $journal->workspace($request['workspace_id'])['resolved_images'];
+        same(3, $reads);
+        $journal->retry('operator', $op['id']);
+        same('succeeded', $engine->tick()['status']);
+        same(3, $reads);
+        same($images, $journal->workspace($request['workspace_id'])['resolved_images']);
+    } finally {
+        foreach (glob($dir . '/*') as $file) { unlink($file); }
+        @unlink($dir . '/.lock'); rmdir($dir);
+    }
+});

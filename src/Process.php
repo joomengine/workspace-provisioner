@@ -16,7 +16,7 @@ final class Process
         }
         $env = ['PATH' => '/usr/sbin:/usr/bin:/sbin:/bin', 'LANG' => 'C.UTF-8', 'HOME' => '/nonexistent'];
         foreach ($environment as $key => $value) {
-            if (!in_array($key, ['INCUS_CONF', 'HOME', 'PGPASSFILE'], true) || !is_string($value)) {
+            if (!in_array($key, ['INCUS_CONF', 'HOME', 'PGPASSFILE', 'COMPOSER_HOME'], true) || !is_string($value)) {
                 throw new Fault('invalid_environment', 'Unsupported subprocess environment.');
             }
             $env[$key] = $value;

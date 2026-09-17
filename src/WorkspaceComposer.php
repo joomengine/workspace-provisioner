@@ -49,6 +49,7 @@ final readonly class WorkspaceComposer
         }
         $result['auth'] = isset($this->config['auth_secret'])
             ? Json::decode(Files::readPrivate($secretDirectory . '/' . $this->config['auth_secret'], 65536)) : [];
+        if (strlen(Json::encode($result)) > 1048576) { throw new Fault('input_too_large', 'Combined Composer inputs exceed the bootstrap limit.'); }
         return $result;
     }
 }
