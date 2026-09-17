@@ -22,9 +22,9 @@ for asset in workspace-provisioner.tar.gz workspace-provisioner.zip release.json
         "https://github.com/$repository/releases/download/$tag/$asset" > "$stage/$asset"
 done
 [[ $(wc -l < "$stage/SHA256SUMS") -eq 3 ]]
-grep -Eq '^[a-f0-9]{64}  workspace-provisioner.tar.gz$' "$stage/SHA256SUMS"
-grep -Eq '^[a-f0-9]{64}  workspace-provisioner.zip$' "$stage/SHA256SUMS"
-grep -Eq '^[a-f0-9]{64}  release.json$' "$stage/SHA256SUMS"
+grep -Eq '^[a-f0-9]{64}  workspace-provisioner\.tar\.gz$' "$stage/SHA256SUMS"
+grep -Eq '^[a-f0-9]{64}  workspace-provisioner\.zip$' "$stage/SHA256SUMS"
+grep -Eq '^[a-f0-9]{64}  release\.json$' "$stage/SHA256SUMS"
 (cd "$stage" && sha256sum --strict -c SHA256SUMS)
 [[ $(jq -er '.tag' "$stage/release.json") == "$tag" ]]
 [[ $(jq -er '.name' "$stage/release.json") == "$repository" ]]
