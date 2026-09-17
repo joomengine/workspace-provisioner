@@ -93,6 +93,28 @@ final readonly class Config
             Validate::integer($host['memory_mib_budget'], 1024, 16777216);
             Validate::integer($host['disk_gib_budget'], 10, 1048576);
         }
+        $topology = array_values($data['hosts']);
+        foreach ($topology as $index => $host) {
+            foreach (array_slice($topology, $index + 1) as $other) {
+                if ($host['remote'] === $other['remote']) {
+                    throw new Fault('invalid_config', 'Each compute host must use a distinct Incus remote.');
+                }
+                $ip = explode('/', $host['bridge_address'])[0];
+                $otherIp = explode('/', $other['bridge_address'])[0];
+                if (Validate::contains($host['bridge_address'], $otherIp) || Validate::contains($other['bridge_address'], $ip)) {
+                    throw new Fault('invalid_config', 'Compute-host workspace networks must not overlap.');
+                }
+            }
+            foreach ($topology as $other) {
+                foreach ($host['ingress'] as $source) {
+                    foreach ($other['addresses'] as $address) {
+                        if (Validate::contains($source, $address)) {
+                            throw new Fault('invalid_config', 'Trusted ingress must exclude every host\'s workspace pool.');
+                        }
+                    }
+                }
+            }
+        }
         foreach ($data['profiles'] as $profile) {
             Validate::object($profile, ['cpu', 'memory_mib', 'disk_gib', 'network_mbit', 'io_mib']);
             Validate::integer($profile['cpu'], 1, 64);
