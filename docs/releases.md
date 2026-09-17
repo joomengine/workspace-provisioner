@@ -1,29 +1,29 @@
-# Versioned packages and the latest channel
+# Automated versions and releases
 
-The generic provisioner is released independently of any operator's chosen JCB image, private recipes, Composer manifests, credentials or topology. Those inputs stay outside the repository and distribution archive. The provisioner's own composer.json and composer.lock ship in the package; they are not the customer's application dependency manifest.
+Merging reviewed work to `main` triggers the complete Quality workflow (PHP and PostgreSQL), Docker integration, and installable package verification. Successful checks publish a semantic version and advance GitHub's stable **latest release**. No separate lab service, GitHub App, repository variable or human qualification check is needed to publish. Public pull-request workflows have no publishing permission.
 
-## Automatic publication
+The first version is `0.1.0`. Subsequent releases increment major for conventional breaking-change commits, minor for `feat`, and patch otherwise. Release planning considers commits since the highest reachable stable tag. Existing version tags and published assets are immutable; retrying publication resumes the same draft or recognizes an already published revision. Publication is serialized. A superseded main revision cannot advance latest.
 
-The `Automated stable release` workflow runs for main changes, an explicit rerun, or an authorized `workspace-qualified` repository dispatch. It runs the PHP/database quality suite, Docker integration, and package verification before publication. The publisher additionally requires a successful `Incus qualification` check for the **exact main commit**, issued by the GitHub App ID in the `QUALIFICATION_APP_ID` repository variable. A missing, pending, failed or untrusted check prevents publication. Configure the `release` environment and its branch/protection rules before enabling stable releases. No production-connected self-hosted runner is attached to public pull-request jobs.
+## Package contents
 
-After the lab records that check, it can send the authorized repository dispatch to resume the release automatically. That integration must be supplied by the protected lab; this repository does not invent a passing lab result. The workflow always checks the current main SHA and rejects stale qualification. It never publishes the PR head or silently marks Phase 1 qualified.
+The release includes `workspace-provisioner.tar.gz`, `workspace-provisioner.zip`, `release.json`, and `SHA256SUMS`. Both archives contain runtime PHP, `bin/workspace`, guest helpers, image builders, schemas, examples, operator tooling, documentation, the license, Composer manifest/lock and generated autoload files. No private configuration, customer data or operator credentials are packaged. Package tests extract and execute the CLI, validate Composer metadata, and compare two independently built archives.
 
-Versioning starts at 0.1.0. A conventional `feat:` commit advances the minor number; an exclamation mark in a conventional header or a `BREAKING CHANGE:` footer advances the major number. Other changes advance the patch number. The highest required increment wins. Commit messages therefore need to reflect compatibility impact. No manual version bump or moving Git tag is required. Repeating a published revision does not replace its assets.
+`release.json` records the version, tag and exact commit. Checksums cover the download assets. Publication first uploads to a draft, downloads and verifies its assets, then publishes and advances latest. A failed draft is not the stable channel.
 
-The workflow calculates the version, builds all assets, creates/updates a **draft** release, uploads and re-downloads/checks its assets, then publishes it and marks it latest. It performs these steps in one workflow rather than depending on a token-created tag to trigger a second workflow. A failed build or upload leaves the previous latest release in place.
+## Tracking latest
 
-## Package contents and usage
+The stable download endpoint is:
 
-Every version has these stable asset names:
+```
+https://github.com/joomengine/workspace-provisioner/releases/latest/download/workspace-provisioner.tar.gz
+```
 
-- `workspace-provisioner.tar.gz` and `workspace-provisioner.zip`: the PHP application, Composer metadata/lock, CLI, Bash helpers, guest assets, image definitions, examples and documentation.
-- `release.json`: version, exact source SHA, source timestamp and package entrypoint.
-- `SHA256SUMS`: hashes for the two archives and release metadata.
+Resolve the latest release once, then download all assets from that **version's** URLs and verify `SHA256SUMS`; otherwise a new release between downloads can mix versions. Keep the previously installed package for rollback. A latest release is an alias to a versioned artifact, not a mutable version tag or a moving Git branch. Composer uses semantic version tags or constraints; `latest` is not a Composer version constraint.
 
-`bash tests/package.sh` builds twice, compares checksums, extracts the archive and exercises its CLI and Composer autoloading. Hosted CI requires Composer for this check. The code has no external PHP runtime packages; PHP and its documented extensions, Incus tooling and host prerequisites remain operator-managed. The archive is a provisioner distribution, not a bundled VM disk or JCB Docker image.
+The provisioner's package version is independent of the JCB Docker selector. The operator's external catalog chooses JCB, database and development images and may use `latest`; the provisioner resolves floating image tags to digests once per new workspace. Existing workspace digests and customer files are never silently rewritten by a provisioner update.
 
-Use GitHub's `releases/latest` endpoint for a stable channel. Resolve that endpoint to one version tag before downloading its assets; do not fetch the archive and checksum independently through a moving latest URL. Record the resolved version, source SHA and checksum in the operator deployment record. Preserve immutable versioned releases for rollback. The first latest channel is available only after the first qualified stable publication.
+## Review and deployment
 
-A new provisioner package must not replace a running worker mid-operation or reinitialize existing workspaces. The surrounding service stages the package, verifies it, drains/stops workers, applies reviewed state migrations where necessary and switches versions under its deployment policy. Existing workspace image digests and user files are not automatically rewritten by a provisioner release.
+A complete runtime with passing automated checks is ready for human review. Reviewers and operators perform infrastructure acceptance on their selected Incus/KVM hosts after that handoff. These tests remain supplied and documented; they are not an invented prerequisite for marking a code PR ready or producing a package. Neither a published release nor green hosted CI claims that every operator topology has been tested or that VM escape is impossible.
 
-The source-only workflow artifact is a review aid; a release-package artifact is an installable candidate. Neither is a published or qualified stable release by itself.
+The source-only workflow archive is a review aid. Release-package workflow artifacts are installable candidates, not automatically published releases. No release from this branch is published before the owner merges it.
