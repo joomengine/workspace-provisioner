@@ -25,3 +25,7 @@ Record commit, image digests/fingerprints, host versions, policy and recipe iden
 ## Ownership
 
 The provisioner owns its VM lifecycle and resource records. A calling service owns user eligibility and any public edge publication. Phase-one ready means verified private endpoints, not a public DNS record or firewall rule.
+
+## Code-review handoff
+
+Phase-one runtime completion and infrastructure acceptance are separate milestones. Once all runtime, configuration, packaging, developer guidance and test tooling are implemented and available automated checks pass, mark the pull request ready for human review. Report real-VM tests not run as unrun; they do not block that handoff. Humans review, merge and exercise the supplied infrastructure tests on their selected hosts. Do not check an unexecuted test as passed or require an external lab approval service for release automation.

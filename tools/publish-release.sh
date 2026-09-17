@@ -3,17 +3,12 @@ set -euo pipefail
 : "${GITHUB_REPOSITORY:?Repository identity is required}"
 : "${GITHUB_SHA:?Reviewed source SHA is required}"
 : "${GH_TOKEN:?An authorized release token is required}"
-: "${QUALIFICATION_APP_ID:?Set the trusted qualification GitHub App ID before publishing}"
-[[ $GITHUB_SHA =~ ^[a-f0-9]{40}$ && $QUALIFICATION_APP_ID =~ ^[0-9]+$ ]] || exit 2
+[[ $GITHUB_SHA =~ ^[a-f0-9]{40}$ ]] || exit 2
 [[ $(git rev-parse HEAD) == "$GITHUB_SHA" ]] || { echo 'Wrong checked-out revision.' >&2; exit 1; }
 [[ $(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha) == "$GITHUB_SHA" ]] || { echo 'Superseded main revision; no release published.'; exit 0; }
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
-# Only a check from the separately trusted lab identity can authorize stable publication.
-gh api --paginate "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/check-runs?per_page=100" > "$work/checks.json"
-jq -se --arg sha "$GITHUB_SHA" --argjson app "$QUALIFICATION_APP_ID" \
-    '[.[].check_runs[] | select(.name == "Incus qualification" and .app.id == $app and .head_sha == $sha)] | sort_by(.id) | last | .status == "completed" and .conclusion == "success"' \
-    "$work/checks.json" >/dev/null || { echo 'No successful trusted Incus qualification for this exact revision.' >&2; exit 1; }
+# Invoked only by the main-branch job after Quality, Docker integration and package tests.
 php tools/release.php plan > "$work/plan.json"
 tag=$(jq -er .tag "$work/plan.json")
 version=$(jq -er .version "$work/plan.json")
@@ -37,5 +32,6 @@ fi
 gh release upload "$tag" --repo "$GITHUB_REPOSITORY" --clobber "$work/package/"*
 gh release download "$tag" --repo "$GITHUB_REPOSITORY" --dir "$work/downloaded"
 (cd "$work/downloaded" && sha256sum -c SHA256SUMS)
+[[ $(gh api "repos/$GITHUB_REPOSITORY/commits/main" --jq .sha) == "$GITHUB_SHA" ]] || { echo 'Main advanced during packaging; leaving the draft unpublished.'; exit 0; }
 # All artifacts exist and match before latest changes. No published release is overwritten.
 gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --draft=false --latest

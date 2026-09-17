@@ -42,6 +42,6 @@ final class Release
             'version' => $version, 'tag' => 'v' . $version, 'commit' => $commit,
             'source_date_epoch' => $timestamp, 'prerelease' => str_contains($version, '-'),
             'entrypoint' => 'bin/workspace', 'configuration' => 'external-operator-files',
-            'qualification' => 'See the release qualification check; packaging alone is not VM qualification.'];
+            'qualification' => 'Automated PHP, database, Docker and package checks; real Incus host acceptance is an operator responsibility.'];
     }
 }

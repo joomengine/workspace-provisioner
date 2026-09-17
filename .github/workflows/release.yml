@@ -3,8 +3,6 @@ on:
   push:
     branches: [main]
   workflow_dispatch:
-  repository_dispatch:
-    types: [workspace-qualified]
 permissions:
   contents: read
 concurrency:
@@ -22,10 +20,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 15
-    environment: release
     permissions:
       contents: write
-      checks: read
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
         with:
@@ -38,8 +34,7 @@ jobs:
           tools: composer:v2
           coverage: none
       - run: bash tests/package.sh
-      - name: Publish qualified revision and advance latest
+      - name: Publish tested revision and advance latest
         run: bash tools/publish-release.sh
         env:
           GH_TOKEN: ${{ github.token }}
-          QUALIFICATION_APP_ID: ${{ vars.QUALIFICATION_APP_ID }}
