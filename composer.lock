@@ -1,0 +1,19 @@
+{
+    "content-hash": "f79527e4d3330930a121234a5bf7a4cf",
+    "packages": [],
+    "packages-dev": [],
+    "aliases": [],
+    "minimum-stability": "stable",
+    "stability-flags": {},
+    "prefer-stable": false,
+    "prefer-lowest": false,
+    "platform": {
+        "php": ">=8.3",
+        "ext-json": "*",
+        "ext-pdo": "*",
+        "ext-posix": "*",
+        "ext-sodium": "*"
+    },
+    "platform-dev": {},
+    "plugin-api-version": "2.6.0"
+}
