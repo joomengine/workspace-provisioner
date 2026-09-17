@@ -1,0 +1,14 @@
+{
+    "version": 1,
+    "id": "verify-cli",
+    "steps": [
+        {
+            "id": "verify-joomla-cli",
+            "target": "joomla",
+            "argv": ["extension:list", "--type=component"],
+            "timeout": 60,
+            "repeat": "safe",
+            "check": {"argv": ["extension:list", "--type=component"]}
+        }
+    ]
+}
