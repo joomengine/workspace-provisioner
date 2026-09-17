@@ -32,11 +32,11 @@ try {
     }
     $home = '/tmp/composer-' . bin2hex(random_bytes(16));
     if (!mkdir($home, 0700)) { throw new Fault('file_write_failed', 'Cannot create temporary Composer home.'); }
-    Files::write($home . '/auth.json', Json::encode($input['auth']));
+    Files::write($home . '/auth.json', Json::encode((object) $input['auth']));
     // This entire one-off container, including /tmp, is removed after execution.
     $environment = ['HOME' => $home, 'COMPOSER_HOME' => $home];
     $process = new Process();
-    $base = ['/usr/local/bin/composer', '--no-interaction', '--no-plugins', '--no-scripts', '--no-cache', '--working-dir', $target];
+    $base = ['/usr/local/bin/php', '/usr/local/bin/composer', '--no-interaction', '--no-plugins', '--no-scripts', '--no-cache', '--working-dir', $target];
     $process->requireSuccess([...$base, 'validate', '--check-lock', '--no-check-publish'], '', $timeout, $environment);
     $flags = $input['dev'] ? [] : ['--no-dev'];
     $process->requireSuccess([...$base, 'install', '--prefer-dist', '--no-progress', ...$flags], '', $timeout, $environment);

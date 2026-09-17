@@ -11,7 +11,8 @@ final readonly class Config
     public function __construct(array $data)
     {
         Validate::object($data, ['version', 'installation_id', 'state', 'vault', 'incus', 'hosts',
-            'profiles', 'catalog', 'callers', 'recipe_secrets', 'backup_directory']);
+            'profiles', 'catalog', 'callers', 'recipe_secrets', 'backup_directory'], ['image_resolver']);
+        if (isset($data['image_resolver'])) { new ImageResolver($data['image_resolver']); }
         Validate::integer($data['version'], 1, 1);
         Validate::uuid($data['installation_id']);
         Validate::object($data['state'], ['driver'], ['path', 'dsn', 'username', 'password_file']);
@@ -101,9 +102,10 @@ final readonly class Config
             Validate::integer($profile['io_mib'], 1, 4096);
         }
         foreach ($data['catalog'] as $entry) {
-            Validate::object($entry, ['vm_image', 'jcb_image', 'database_image', 'development_image', 'uid', 'gid'], ['recipe', 'vm_executables']);
+            Validate::object($entry, ['vm_image', 'jcb_image', 'database_image', 'development_image', 'uid', 'gid'], ['recipe', 'vm_executables', 'composer']);
+            if (isset($entry['composer'])) { new WorkspaceComposer($entry['composer']); }
             Validate::digest($entry['vm_image']);
-            foreach (['jcb_image', 'database_image', 'development_image'] as $key) { Validate::image($entry[$key]); }
+            foreach (['jcb_image', 'database_image', 'development_image'] as $key) { ImageResolver::selector($entry[$key]); }
             Validate::integer($entry['uid'], 1, 60000);
             Validate::integer($entry['gid'], 1, 60000);
             if (isset($entry['recipe'])) { Validate::path($entry['recipe']); }

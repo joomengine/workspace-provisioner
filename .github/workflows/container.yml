@@ -23,6 +23,8 @@ jobs:
           php-version: '8.3'
           extensions: pdo, posix, sodium
           coverage: none
+      - name: Install unprivileged OCI manifest resolver
+        run: sudo apt-get update -qq && sudo apt-get install -y skopeo
       - name: Test on disposable hosted Docker daemon
         run: bash tests/container.sh
         env:

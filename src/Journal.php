@@ -47,6 +47,9 @@ final readonly class Journal
                 $profile = $this->config->data['profiles'][$r['profile']] ?? throw new Fault('unknown_profile', 'Unknown resource profile.');
                 [$host, $address] = $this->allocate($state, $profile);
                 $entry = $this->config->data['catalog'][$r['catalog']];
+                if (isset($entry['composer'])) {
+                    (new WorkspaceComposer($entry['composer']))->payload($this->config->data['recipe_secrets']);
+                }
                 $state['workspaces'][$id] = ['id' => $id, 'name' => $r['name'], 'tenant' => $r['tenant'],
                     'instance' => 'ws-' . str_replace('-', '', $id), 'host' => $host, 'address' => $address,
                     'host_hash' => Json::hash($this->config->data['hosts'][$host]), 'generation' => 0,

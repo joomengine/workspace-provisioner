@@ -13,7 +13,14 @@ final readonly class IncusRuntime implements Runtime
     }
 
     private function host(array $w): array { return $this->config->data['hosts'][$w['host']]; }
-    private function catalog(array $w): array { return $this->config->data['catalog'][$w['catalog']]; }
+    private function catalog(array $w): array
+    {
+        $entry = $this->config->data['catalog'][$w['catalog']];
+        foreach (['jcb_image', 'database_image', 'development_image'] as $key) {
+            $entry[$key] = Validate::image($w['resolved_images'][$key] ?? $entry[$key]);
+        }
+        return $entry;
+    }
     private function api(array $w): IncusApi
     {
         $h = $this->host($w);
@@ -133,7 +140,7 @@ final readonly class IncusRuntime implements Runtime
         if (!$available) { throw new Fault('agent_unavailable', 'Incus guest agent did not become ready.'); }
         $this->requiredGuest($workspace, ['/usr/bin/install', '-d', '-m', '0700', self::ROOT, self::ROOT . '/lib', self::ROOT . '/lib/src']);
         $files = ['guest/runner.php' => self::ROOT . '/runner.php', 'bootstrap.php' => self::ROOT . '/lib/bootstrap.php',
-            'guest/probe.php' => self::ROOT . '/probe.php', 'guest/install.sh' => self::ROOT . '/install.sh',
+            'guest/probe.php' => self::ROOT . '/probe.php', 'guest/composer-install.php' => self::ROOT . '/composer-install.php', 'guest/install.sh' => self::ROOT . '/install.sh',
             'guest/jcb-workspace.service' => '/etc/systemd/system/jcb-workspace.service'];
         foreach (['Fault', 'Files', 'Json', 'Validate', 'Process'] as $class) { $files['src/' . $class . '.php'] = self::ROOT . '/lib/src/' . $class . '.php'; }
         foreach ($files as $source => $target) {
@@ -141,6 +148,7 @@ final readonly class IncusRuntime implements Runtime
             if ($contents === false) { throw new Fault('missing_asset', 'A required packaged guest asset is missing.'); }
             $this->upload($workspace, $target, $contents, '0644');
         }
+        $this->requiredGuest($workspace, ['/usr/bin/chmod', '0755', self::ROOT . '/lib', self::ROOT . '/lib/src']);
         $h = $this->host($workspace);
         $c = $this->catalog($workspace);
         [$gateway, $prefix] = explode('/', $h['bridge_address']);
@@ -156,7 +164,19 @@ final readonly class IncusRuntime implements Runtime
         $this->upload($workspace, self::ROOT . '/compose.json', Json::encode(Compose::render($workspace, $c, true)));
     }
 
-    public function initialize(array $workspace): void { $this->helper($workspace, 'initialize', '', 3000); }
+    public function initialize(array $workspace): void
+    {
+        $this->helper($workspace, 'initialize', '', 3000);
+        $entry = $this->catalog($workspace);
+        if (isset($entry['composer'])) {
+            $payload = (new WorkspaceComposer($entry['composer']))->payload($this->config->data['recipe_secrets']);
+            try {
+                $this->helper($workspace, 'composer', Json::encode($payload), $payload['timeout'] + 60);
+            } finally {
+                $this->helper($workspace, 'composer-cleanup');
+            }
+        }
+    }
 
     public function start(array $workspace): void
     {
