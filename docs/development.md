@@ -17,4 +17,4 @@ For database tests, create an isolated PostgreSQL database whose name ends in `_
 
 The file-backed store is for local development or a single controller on local storage. PostgreSQL is recommended for operational installations. The initial journal serializes short state mutations and allows one active infrastructure executor per store; this is an intentional safety boundary, not a claim of parallel provisioning. Multiple trusted submitters may enqueue requests. State transactions are not held across remote operations.
 
-Public CI uses read-only repository permissions, pinned actions and disposable hosted runners. It does not receive operator secrets or access a compute host. Actual VM qualification is a separate gate.
+Public CI uses read-only repository permissions, pinned actions and disposable hosted runners. It does not receive operator secrets or access a compute host. Actual VM qualification is subsequent operator acceptance, not a prerequisite for handing completed runtime code to human reviewers.

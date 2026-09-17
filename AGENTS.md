@@ -22,3 +22,7 @@ Changes are incremental: one focused commit per completed task, pushed to the ac
 Unit tests must not call live Incus or access external credentials. Privileged tests require explicit lab configuration and opt-in. Never connect public pull-request code to production or a persistent privileged runner. Avoid claiming that tests prove escape impossible.
 
 Do not silently adopt unrelated resources, initialize an existing host, format storage, reset customer data, retry non-idempotent steps, or convert private endpoints into publicly reachable services.
+
+## Review handoff and releases
+
+Finish runtime, configuration, packaging and operator/test tooling before marking a PR ready for review. Passing available automated checks supports that handoff; actual operator-host acceptance is performed by humans afterward. Report unrun infrastructure tests honestly, but do not invent an external lab approval service, required App identity or qualification dispatch as a prerequisite for readiness or automated package publication. Do not merge automatically. Maintain the stable latest-release channel while preserving immutable versioned artifacts and existing workspace image digests.
