@@ -1,0 +1,45 @@
+name: Automated stable release
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  repository_dispatch:
+    types: [workspace-qualified]
+permissions:
+  contents: read
+concurrency:
+  group: stable-release
+  cancel-in-progress: false
+jobs:
+  verify:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/quality.yml
+  containers:
+    if: github.ref == 'refs/heads/main'
+    uses: ./.github/workflows/container.yml
+  publish:
+    needs: [verify, containers]
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment: release
+    permissions:
+      contents: write
+      checks: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240
+        with:
+          php-version: '8.3'
+          extensions: pdo, posix, sodium
+          tools: composer:v2
+          coverage: none
+      - run: bash tests/package.sh
+      - name: Publish qualified revision and advance latest
+        run: bash tools/publish-release.sh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          QUALIFICATION_APP_ID: ${{ vars.QUALIFICATION_APP_ID }}
