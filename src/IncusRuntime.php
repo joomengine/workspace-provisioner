@@ -37,7 +37,8 @@ final readonly class IncusRuntime implements Runtime
             'config' => ['user.wp.owner' => $this->config->data['installation_id'], 'user.wp.workspace' => $w['id'],
                 'user.wp.recipe' => $w['recipe_hash'], 'limits.cpu' => (string) $w['resources']['cpu'],
                 'limits.memory' => $w['resources']['memory_mib'] . 'MiB', 'boot.autostart' => 'false',
-                'security.secureboot' => 'true'],
+                'security.secureboot' => 'true',
+                ...(isset($w['restore_operation']) ? ['user.wp.restore' => Validate::uuid($w['restore_operation'])] : [])],
             'devices' => ['root' => ['type' => 'disk', 'path' => '/', 'pool' => $h['storage'],
                 'size' => $w['resources']['disk_gib'] . 'GiB', 'limits.max' => $w['resources']['io_mib'] . 'MiB'], 'eth0' => $nic]];
     }
@@ -88,6 +89,7 @@ final readonly class IncusRuntime implements Runtime
         }
         $this->instance($workspace);
         $this->power($workspace, true);
+        $this->awaitAgent($workspace);
     }
 
     private function power(array $w, bool $running): void
@@ -129,15 +131,20 @@ final readonly class IncusRuntime implements Runtime
         $this->transport->upload($h['remote'], $h['project'], $w['instance'], $path, $content, $mode);
     }
 
-    public function prepare(array $workspace, array $credentials): void
+    private function awaitAgent(array $workspace): void
     {
-        if ($workspace['handed_over']) { throw new Fault('handed_over', 'Bootstrap is forbidden after customer handover.'); }
         $available = false;
         for ($i = 0; $i < 60; ++$i) {
             if ($this->guest($workspace, ['/usr/bin/true'], '', 5)['exit'] === 0) { $available = true; break; }
             sleep(2);
         }
         if (!$available) { throw new Fault('agent_unavailable', 'Incus guest agent did not become ready.'); }
+    }
+
+    public function prepare(array $workspace, array $credentials): void
+    {
+        if ($workspace['handed_over']) { throw new Fault('handed_over', 'Bootstrap is forbidden after customer handover.'); }
+        $this->awaitAgent($workspace);
         $this->requiredGuest($workspace, ['/usr/bin/install', '-d', '-m', '0700', self::ROOT, self::ROOT . '/lib', self::ROOT . '/lib/src']);
         $files = ['guest/runner.php' => self::ROOT . '/runner.php', 'bootstrap.php' => self::ROOT . '/lib/bootstrap.php',
             'guest/probe.php' => self::ROOT . '/probe.php', 'guest/composer-install.php' => self::ROOT . '/composer-install.php', 'guest/install.sh' => self::ROOT . '/install.sh',
@@ -158,7 +165,8 @@ final readonly class IncusRuntime implements Runtime
             'gateway' => $gateway, 'prefix' => (int) $prefix, 'dns' => $h['dns']]));
         $this->helper($workspace, 'prepare');
         foreach (['admin_username', 'admin_password', 'database_password', 'database_root_password'] as $name) {
-            $this->upload($workspace, self::ROOT . '/secrets/' . $name, $credentials[$name]);
+            $this->upload($workspace, self::ROOT . '/secrets/' . $name, $credentials[$name],
+                str_starts_with($name, 'database_') ? '0644' : '0600');
         }
         $this->upload($workspace, self::ROOT . '/authorized-keys/developer', implode("\n", $workspace['ssh_keys']) . "\n", '0644');
         $this->upload($workspace, self::ROOT . '/compose.json', Json::encode(Compose::render($workspace, $c, true)));
@@ -182,6 +190,7 @@ final readonly class IncusRuntime implements Runtime
     {
         $this->instance($workspace);
         $this->power($workspace, true);
+        $this->awaitAgent($workspace);
         $this->helper($workspace, 'start');
     }
 
@@ -248,7 +257,8 @@ final readonly class IncusRuntime implements Runtime
             return $this->guest($workspace, $argv, $stdin, $step['timeout']);
         }
         return $this->guest($workspace, ['/usr/bin/docker', 'compose', '--project-name', 'jcb-workspace', '-f', self::ROOT . '/compose.json',
-            'exec', '-T', '--user', $c['uid'] . ':' . $c['gid'], 'web', '/usr/local/bin/php', '/var/www/html/cli/joomla.php', ...$argv],
+            'exec', '-T', '--user', $c['uid'] . ':' . $c['gid'], 'web', '/usr/bin/timeout', '--signal=TERM', '--kill-after=5s', $step['timeout'] . 's',
+            '/usr/local/bin/php', '/var/www/html/cli/joomla.php', ...$argv],
             $stdin, $step['timeout']);
     }
 
@@ -264,22 +274,60 @@ final readonly class IncusRuntime implements Runtime
         if ($r['exit'] !== 0) { throw new Fault('recipe_failed', 'A private recipe step failed; output was suppressed.'); }
     }
 
+    private function backups(): BackupStore
+    {
+        return new BackupStore($this->config->data['backup_directory'], $this->config->data['vault']['key_file'],
+            $this->config->data['installation_id']);
+    }
+
     public function backup(array $workspace, string $operation): array
     {
         Validate::uuid($operation);
-        $directory = $this->config->data['backup_directory'];
-        Files::protectedPath($directory, true);
-        if ((fileperms($directory) & 0077) !== 0) { throw new Fault('unsafe_path', 'Backup directory must be owner-only.'); }
+        $store = $this->backups();
+        if ($store->exists($workspace, $operation)) { return $store->metadata($workspace, $operation); }
+        $this->access($workspace, false);
+        $this->start($workspace);
         $this->helper($workspace, 'quiesce');
         $this->suspend($workspace);
-        $path = $directory . '/' . $workspace['id'] . '-' . $operation . '.tar.gz';
-        Files::protectedPath($path);
         $h = $this->host($workspace);
-        if (is_file($path)) { throw new Fault('backup_exists', 'Backup path already exists; inspect the previous attempt.'); }
-        $r = $this->transport->command($h['project'], ['export', $h['remote'] . ':' . $workspace['instance'], $path, '--instance-only'], '', 3600);
-        if ($r['exit'] !== 0) { throw new Fault('backup_failed', 'Workspace export failed; residual archive remains private.'); }
-        chmod($path, 0600);
-        return ['archive' => basename($path), 'sha256' => hash_file('sha256', $path), 'format' => 'incus-instance-export',
-            'encrypted' => false, 'requires_encrypted_storage' => true];
+        return $store->save($workspace, $operation, function (string $path) use ($h, $workspace): void {
+            $r = $this->transport->command($h['project'], ['export', $h['remote'] . ':' . $workspace['instance'],
+                $path, '--instance-only'], '', 3600);
+            if ($r['exit'] !== 0) { throw new Fault('backup_failed', 'Private instance export failed.'); }
+        });
+    }
+
+    public function restore(array $workspace, string $backup, string $operation): void
+    {
+        Validate::uuid($operation);
+        Validate::uuid($backup);
+        $store = $this->backups();
+        $store->metadata($workspace, $backup);
+        (new Host($this->config, $this->transport))->preflight($workspace['host']);
+        (new Host($this->config, $this->transport))->verify($workspace['host']);
+        $api = $this->api($workspace);
+        $existing = $api->find('/1.0/instances', $workspace['instance']);
+        $candidate = $workspace;
+        $candidate['restore_operation'] = $operation;
+        if ($existing !== null) {
+            IncusApi::owned($existing, $this->config->data['installation_id'], $workspace['id']);
+            if (($existing['config']['user.wp.restore'] ?? '') !== $operation) {
+                throw new Fault('restore_conflict', 'Restore never replaces an existing VM; inspect and retire it explicitly first.');
+            }
+            // A retry may find the import already complete; do not import or overwrite twice.
+            $this->instance($candidate);
+            $this->suspend($candidate);
+            return;
+        }
+        $h = $this->host($workspace);
+        $store->withPlaintext($workspace, $backup, function (string $path) use ($h, $workspace, $operation): void {
+            // Pass the authenticated export to Incus without unpacking customer files on this controller.
+            $r = $this->transport->command($h['project'], ['import', $h['remote'] . ':', $path, $workspace['instance'],
+                '--storage', $h['storage'], '--config', 'user.wp.restore=' . $operation,
+                '--config', 'boot.autostart=false', '--device', 'eth0,security.acls=' . $h['network'] . '-bootstrap'], '', 3600);
+            if ($r['exit'] !== 0) { throw new Fault('restore_failed', 'Instance import failed; retry inspects the owned restore identity.'); }
+        });
+        $this->instance($candidate);
+        $this->suspend($candidate);
     }
 }

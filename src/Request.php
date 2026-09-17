@@ -6,7 +6,7 @@ namespace JoomEngine\Workspace;
 
 final readonly class Request
 {
-    public const ACTIONS = ['create', 'verify', 'suspend', 'resume', 'replace-keys', 'delete', 'reconcile', 'backup'];
+    public const ACTIONS = ['create', 'verify', 'suspend', 'resume', 'replace-keys', 'delete', 'reconcile', 'backup', 'restore'];
     public array $data;
     public string $hash;
 
@@ -19,6 +19,8 @@ final readonly class Request
         }
         if ($action === 'create') {
             $required = [...$required, 'name', 'catalog', 'profile', 'admin_email', 'ssh_keys'];
+        } elseif ($action === 'restore') {
+            $required[] = 'backup_id';
         } elseif ($action === 'replace-keys') {
             $required[] = 'ssh_keys';
         }
@@ -27,6 +29,7 @@ final readonly class Request
         Validate::uuid($data['request_id']);
         Validate::uuid($data['workspace_id']);
         Validate::name($data['tenant']);
+        if ($action === 'restore') { Validate::uuid($data['backup_id']); }
         if ($action === 'create') {
             foreach (['name', 'catalog', 'profile'] as $key) {
                 Validate::name($data[$key]);
