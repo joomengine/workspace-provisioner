@@ -1,41 +1,39 @@
-# Qualification and evidence
+# Testing and human infrastructure acceptance
 
-A source change, passing unit test and real infrastructure qualification are different facts. Keep this distinction in PR checklists and release reports. No completed full Incus/KVM qualification is claimed by this document.
+A complete runtime, its automated tests, and a deployed infrastructure acceptance result are distinct facts. A runtime PR is handed to humans by marking it ready for review after implementation and available automated checks are complete. Unrun real-VM tests are disclosed, not invented as a prerequisite for that handoff or for package publication.
 
-## Public automated checks
+## Automated checks
 
-Run `php tools/check.php` and `php tests/run.php` for syntax and deterministic unit/contract tests. `php tests/postgres.php` exercises the operation store against the explicitly configured disposable PostgreSQL database described in [development](development.md). `WP_RUN_CONTAINER_TESTS=1 bash tests/container.sh` is an opt-in integration test for an isolated Docker host. It must not run against a production daemon. The script creates and removes only its uniquely named test project and files.
+`php tools/check.php` validates PHP syntax/JSON and `php tests/run.php` runs deterministic unit and contract tests. `php tests/postgres.php` tests the state store against the disposable database documented in [development](development.md). `WP_RUN_CONTAINER_TESTS=1 bash tests/container.sh` installs actual Joomla/JCB and exercises restricted SSH/SFTP, shared files, matching PHP, private Composer inputs, restarts and workload settings on an isolated Docker host. It never runs against a production daemon.
 
-The Docker test resolves public image tags, builds the development image from the selected JCB base, installs actual Joomla/JCB, applies synthetic locked Composer files, repeats dependency installation, checks SSH/SFTP/shared files, compares PHP runtimes, restarts services and inspects container restrictions. It does not claim VM isolation, a successful JCB component compilation, or a successful full VM restore.
+`bash tests/package.sh` requires Composer and verifies two independently built archives, checksums, generated autoload files/schemas and the extracted CLI. Hosted package CI runs these checks and publishes a candidate artifact. Stable package publication runs after merge and its automated checks as described in [releases](releases.md). There is no required external check-emitting App or lab-dispatch service.
 
-`bash tests/package.sh` verifies reproducibility, runtime assets, archive checksums and the extracted CLI. With Composer available it validates the shipped lockfile and generated autoloader; the GitHub package job installs Composer, so these checks must run there. A local run without Composer is not evidence for that portion. Stable release publication is separately gated; [releases](releases.md) describes the exact-commit check and the protected lab identity.
+Mocks and Docker tests do not claim KVM isolation. Public PR jobs have no privileged infrastructure credentials and must not execute on a production-connected runner.
 
-## Protected real-VM lab
+## Real Incus lifecycle runner
 
-Provisioning/isolation qualification requires administrator-approved, disposable Incus/KVM hosts and a protected management machine. Use synthetic identities and empty customer data only. Keep lab configuration outside the checkout. No public pull-request job receives lab credentials. Only reviewed commits may run in the lab. Two VMs on one host do not establish a cross-host result; use at least two distinct compute hosts for that assertion.
+The package includes `tests/incus.php`. Invoke it explicitly:
 
-Before tests, record the source commit, VM fingerprint, resolved application image digests, PHP/Docker/Incus/QEMU/kernel versions, policy and recipe identities, and non-sensitive host identifiers. Confirm the target hosts/projects and storage are disposable and not connected to production networks. The operator must expressly approve destructive lifecycle tests and capacity stress. Do not initialize unrelated Incus infrastructure to make a test pass.
+```
+WP_RUN_INCUS_TESTS=1 php tests/incus.php /absolute/private/lab-plan.json /absolute/private/new-report.json
+```
 
-The following are mandatory acceptance groups, not evidence of an already completed harness or run:
+This operator tool creates two to four disposable workspaces, verifies idempotent submissions, SSH host identities, SSH/SFTP shared-file roundtrips, web reads, network denial from the customer shell and guest root, key revocation and active-session termination, encrypted backup/replacement restore with file/database comparisons, and container/VM restart persistence. It deletes its own workspaces through the normal lifecycle even after failure. A cleanup failure is reported as a failed run, not hidden. Encrypted test backups remain in the private backup directory for inspection and deliberate retention cleanup.
 
-| Group | Required successful assertions |
-| --- | --- |
-| Host and image | Non-destructive preflight, owned-resource preparation, incompatible capability rejection, clean VM images and distinct keys/identities |
-| Application | Standard deployment without private adaptations; separate synthetic VM/Joomla recipe; actual component import, compile, install and working frontend |
-| Access and persistence | Container-only SSH/SFTP, matching users/runtimes, shared file edits, database/file persistence after container, VM and compute-host restart |
-| Isolation | Known-live forbidden destinations denied from the development shell and from root inside the disposable VM; same-host and cross-host cases; spoofing and IPv6 restrictions |
-| Limits | External CPU/memory/storage/I/O/network containment without destabilizing neighboring workspaces or the host |
-| Recovery | Failure injection between side effect and state persistence, duplicate and concurrent requests, safe retry, no reinstall after handover, retained-data resume |
-| Revocation | Actual active SSH/web access stopped by suspension, revoked keys rejected, resumed access only after verification |
-| Backup and deletion | Authenticated encrypted export, corruption/wrong-context rejection, actual restore, stale key protection and owned-resource cleanup |
-| Confidentiality | No infrastructure credentials/private recipes in guests, public output, image layers or test artifacts |
+The external plan requires `version: 1`, the absolute `operator` configuration path, `caller`, `tenant`, `catalog`, `profile`, `instances` (2-4), `disposable: true` and `confirm_installation` matching that configuration's installation UUID. It rejects unknown fields, missing authorization or an existing operation/workspace history. Create a fresh dedicated configuration/store for each run; never point it at a live installation. Prepare its owned host resources and images first using [operations](operations.md). The runner verifies, but does not initialize, host networks/storage. It needs direct authorized routing to the private workspace IPs, OpenSSH client/SFTP, curl, PHP and the configured Incus client on the management machine.
 
-A negative networking test must first demonstrate that its destination is listening and reachable from an authorized source. Otherwise a closed port or a broken route can give a false isolation result. A policy JSON comparison is not a substitute for packets sent between real machines. An uncontrolled failed backup is not a successful recovery test.
+The test creates unique keys and synthetic data, not real customer material. Do not share production topology or credentials in a public workflow. It executes bounded guest-root *test probes* through the existing Incus management path; this never grants a customer VM access.
 
-## Evidence record
+## Application-specific and network checks
 
-For each objective preserve a sanitized record with objective ID, implementation commit/files, test file and exact command, expected result/assertions, actual pass/fail/skip outcome, UTC time and environment identity. Reference the complete log/report. Do not summarize a skipped check as passed. Reports should cover the exact reviewed source revision; rerun affected tests after changes.
+Optional `application_checks` is a list of objects with `argv` and `verify_argv`, each starting with a Joomla CLI command name. These execute as the customer inside the development container, not guest root. An optional `stdout` requires an exact verification output. `timeout` is 1-1800 seconds (default 600). Supply the selected JCB release's real component import, compile and installation operations and meaningful postconditions. `frontend_path` plus `frontend_contains` can verify the generated component's frontend through the private workspace endpoint. These commands and private demo selections stay in the external plan; the public harness does not guess version-specific command names. Omission is recorded as **skip**, not as a compiled-component pass.
 
-Public evidence can include commit IDs, image digests, test names and outcomes. Keep private recipes, real addresses, credentials and customer data out of it. Retain detailed private diagnostics separately. Store long-lived qualification evidence beyond the expiration of short-lived workflow artifacts.
+Optional `denied_targets` is a list of `{address, port}` objects identifying approved, known-live private lab destinations (IPv4 or IPv6). The management client must first connect successfully, then both the customer shell and root inside its VM must be denied. A dead listener or broken baseline route fails the test rather than falsely proving isolation.
 
-The trusted lab's GitHub App may emit an `Incus qualification` check only after verifying every required group. The check must target the exact commit and identify the retained report. Configuring an App ID or sending a repository dispatch does not itself establish qualification. A missing result blocks stable release promotion. This repository does not create a successful check from a self-declared JSON file.
+Workspace-to-workspace probes also establish a live baseline. Same-host and cross-host results are recorded separately according to actual allocator placement. Configure capacity/address pools so two workspaces land on one host and another on a distinct host to exercise both cases. Two VMs on one host never count as a cross-host test. An unexercised topology is explicitly skipped.
+
+## Remaining human acceptance
+
+The runner does not reboot a physical compute server, launch uncontrolled stress jobs, or pretend that comparing JSON proves resistance to every spoofing attack. Human infrastructure acceptance additionally exercises compute-host reboot/reconciliation, active MAC/IP spoofing resistance, IPv6 policy, external CPU/memory/disk/I/O/network containment, image-update recovery, and a security review of the intended topology. Deterministic tests already inject lifecycle failures and check interrupted import, stale ownership, unsafe configuration, timeout/output limits, secret envelopes and backup corruption. Extend controlled lab tests as new environments are qualified.
+
+Reports record the source revision, runtime/image/policy/recipe identity, individual pass/fail/skip results, timestamps and cleanup outcome. Raw command output, customer data, keys and addresses are not included. The report is a private mode-0600 file; review/sanitize it before any public publication. It explicitly does not label a lifecycle run as complete security certification. Retain long-lived human acceptance reports independently of expiring CI artifacts.
