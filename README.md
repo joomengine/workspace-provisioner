@@ -18,7 +18,7 @@ The first release covers non-destructive host preflight/preparation, repeatable 
 
 ## Implementation and qualification
 
-Phase-one implementation is being assembled in reviewable increments. A passing unit test or a running container is not evidence of VM isolation. Actual qualification requires a dedicated, disposable Incus/KVM environment and the release's integration tests; never attach public pull-request jobs to production infrastructure.
+The Phase 1 runtime, configuration contracts, image builders, lifecycle tooling and release packaging are implemented. Review the current PR checks and the acceptance guide before deployment. A passing unit test or a running container is not evidence of VM isolation. Actual qualification requires a dedicated, disposable Incus/KVM environment and the release's integration tests; never attach public pull-request jobs to production infrastructure.
 
 The upstream image source is [joomengine/docker](https://github.com/joomengine/docker). This project consumes approved image digests rather than duplicating the upstream build system.
 
@@ -32,6 +32,10 @@ Apache-2.0; see [LICENSE](LICENSE). Upstream software and container images retai
 
 ## Operator and developer entry points
 
-Run `php bin/workspace help` for the service/CLI interface. Start with [external configuration](docs/configuration.md), [development setup](docs/development.md), [security boundaries](docs/security.md), and [qualification evidence](docs/qualification.md). [Release automation](docs/releases.md) documents semantic versions, installable archives, Composer metadata and the stable `latest` channel.
+Run `php bin/workspace help` for the service/CLI interface. Start with [operator installation](docs/operations.md), [configuration schemas](docs/schemas.md), [external configuration](docs/configuration.md), [development setup](docs/development.md), [security boundaries](docs/security.md), and [qualification evidence](docs/qualification.md). [Release automation](docs/releases.md) documents semantic versions, installable archives, Composer metadata and the stable `latest` channel.
 
 Production image selectors, private initialization recipes and workspace Composer files belong in external operator configuration. A configured container tag such as `latest` is resolved once per new workspace and stored as an exact digest. Restart/retry does not silently upgrade existing workspaces. Generated Compose definitions preserve the platform's security policy; arbitrary Compose overrides are not accepted.
+
+## Installable releases
+
+After a reviewed change is merged to `main`, automated checks build versioned tar/zip packages containing the PHP runtime, Composer manifest/lock/autoload, guest and image tooling, schemas, examples and tests. Publication advances the stable latest release only after checks and asset verification succeed. `bash tools/download-release.sh latest NEW_DIRECTORY` resolves that release once and downloads matching checksummed assets without modifying your installation or private configuration. [Implementation coverage](docs/implementation.md) maps the runtime objectives to code and tests.
