@@ -19,3 +19,32 @@ test('floating image selectors resolve to manifest digests without changing pinn
         rejects(fn () => ImageResolver::selector($bad), 'invalid_image');
     }
 });
+
+test('registry resolution scopes auth explicitly and cleans anonymous credentials', function (): void {
+    $dir = sys_get_temp_dir() . '/wp-image-test-' . bin2hex(random_bytes(8));
+    mkdir($dir, 0700);
+    try {
+        $report = $dir . '/report.json';
+        $program = '#!' . PHP_BINARY . "\n<?php\n" . '$index = array_search("--authfile", $argv, true);'
+            . 'if ($index === false) { exit(2); } $path = $argv[$index + 1];'
+            . 'file_put_contents(' . var_export($report, true) . ', json_encode(["path"=>$path,"data"=>file_get_contents($path),"mode"=>(fileperms($path)&0777)]));'
+            . 'echo \'{"schemaVersion":2,"manifests":[]}\';';
+        JoomEngine\Workspace\Files::write($dir . '/registry', $program, 0700);
+        $pinned = 'example/pinned@sha256:' . str_repeat('a', 64);
+        $catalog = ['jcb_image' => 'example/public:latest', 'database_image' => $pinned, 'development_image' => $pinned];
+        (new ImageResolver(['binary' => $dir . '/registry']))->resolve($catalog);
+        $result = Json::decode(file_get_contents($report));
+        same('{"auths":{}}', $result['data']);
+        same(0600, $result['mode']);
+        same(false, file_exists($result['path']));
+        same(false, is_dir(dirname($result['path'])));
+        JoomEngine\Workspace\Files::write($dir . '/auth.json', '{"auths":{"example.test":{}}}');
+        (new ImageResolver(['binary' => $dir . '/registry', 'auth_file' => $dir . '/auth.json']))->resolve($catalog);
+        $result = Json::decode(file_get_contents($report));
+        same($dir . '/auth.json', $result['path']);
+        same(true, file_exists($result['path']));
+    } finally {
+        foreach (glob($dir . '/*') as $path) { unlink($path); }
+        rmdir($dir);
+    }
+});

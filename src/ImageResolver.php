@@ -33,12 +33,26 @@ final readonly class ImageResolver
             } else {
                 $binary = $this->config['binary'] ?? '/usr/bin/skopeo';
                 Files::protectedPath($binary);
-                $args = [$binary, 'inspect', '--raw', '--tls-verify=true'];
-                if (isset($this->config['auth_file'])) {
-                    Files::readPrivate($this->config['auth_file']);
-                    $args = [...$args, '--authfile', $this->config['auth_file']];
+                $temporary = null;
+                try {
+                    $auth = $this->config['auth_file'] ?? null;
+                    if ($auth === null) {
+                        $temporary = sys_get_temp_dir() . '/wp-registry-' . bin2hex(random_bytes(16));
+                        if (!mkdir($temporary, 0700)) { throw new Fault('registry_auth_failed', 'Cannot create isolated registry authentication context.'); }
+                        $auth = $temporary . '/auth.json';
+                        Files::write($auth, '{"auths":{}}');
+                    } else {
+                        Files::readPrivate($auth);
+                    }
+                    // Never search the host's ambient Docker/Podman credentials implicitly.
+                    $raw = (new Process())->requireSuccess([$binary, 'inspect', '--raw', '--tls-verify=true',
+                        '--authfile', $auth, 'docker://' . $reference], '', 180);
+                } finally {
+                    if ($temporary !== null) {
+                        if (is_file($temporary . '/auth.json')) { unlink($temporary . '/auth.json'); }
+                        rmdir($temporary);
+                    }
                 }
-                $raw = (new Process())->requireSuccess([...$args, 'docker://' . $reference], '', 180);
             }
             $manifest = Json::decode($raw);
             if (($manifest['schemaVersion'] ?? null) !== 2 || (!isset($manifest['manifests']) && !isset($manifest['config'], $manifest['layers']))) {
