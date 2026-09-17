@@ -6,6 +6,11 @@ root=$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$root"
 [[ $# == 2 ]] || { echo 'Usage: bash tools/package.sh VERSION NEW_OUTPUT_DIRECTORY' >&2; exit 2; }
 version=$(php tools/release.php version "$1")
+composer_version=$version
+case $version in
+    *-dev.*) composer_version="${version%%-*}-dev" ;;
+    *-rc.*) candidate=${version#*-rc.}; composer_version="${version%%-*}-RC${candidate%%.*}" ;;
+esac
 output=$2
 [[ $output == /* && ! -e $output && ! -L $output ]] || { echo 'Use a new absolute output directory.' >&2; exit 2; }
 for tool in git tar gzip zip sha256sum composer; do command -v "$tool" >/dev/null; done
@@ -23,7 +28,7 @@ cp "$package/release.json" "$output/release.json"
 # Install only the committed lock with an isolated Composer home; scripts/plugins cannot run.
 (
     unset COMPOSER COMPOSER_AUTH COMPOSER_VENDOR_DIR COMPOSER_BIN_DIR COMPOSER_IGNORE_PLATFORM_REQS COMPOSER_IGNORE_PLATFORM_REQ
-    export COMPOSER_HOME="$stage/composer-home" COMPOSER_CACHE_DIR="$stage/composer-cache" COMPOSER_ROOT_VERSION="$version"
+    export COMPOSER_HOME="$stage/composer-home" COMPOSER_CACHE_DIR="$stage/composer-cache" COMPOSER_ROOT_VERSION="$composer_version"
     cd "$package"
     composer validate --strict
     composer install --no-dev --no-plugins --no-scripts --no-interaction --no-progress --optimize-autoloader
