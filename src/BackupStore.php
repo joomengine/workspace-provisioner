@@ -21,6 +21,15 @@ final readonly class BackupStore
         $this->manifestKey = hash_hkdf('sha256', $key, 32, 'workspace-backup-manifest-v1', $installation);
     }
 
+    public function exists(array $workspace, string $backup): bool
+    {
+        $path = $this->path($workspace, $backup);
+        if (file_exists($path) && !is_dir($path)) {
+            throw new Fault('invalid_backup', 'Backup destination is not a directory.');
+        }
+        return is_dir($path);
+    }
+
     public function save(array $workspace, string $backup, callable $export): array
     {
         $destination = $this->path($workspace, $backup);
@@ -35,7 +44,7 @@ final readonly class BackupStore
             $metadata = ['version' => 1, 'id' => $backup, 'installation_id' => $this->installation,
                 'workspace_id' => $workspace['id'], 'instance' => $workspace['instance'],
                 'host_hash' => $workspace['host_hash'], 'catalog_hash' => $workspace['catalog_hash'],
-                'recipe_hash' => $workspace['recipe_hash'], 'created_at' => gmdate(DATE_ATOM),
+                'recipe_hash' => $workspace['recipe_hash'], 'images_hash' => Json::hash($workspace['resolved_images'] ?? []), 'created_at' => gmdate(DATE_ATOM),
                 'plain_sha256' => hash_file('sha256', $plain), 'plain_bytes' => filesize($plain)];
             $this->archive->seal($plain, $stage . '/payload.enc', Json::encode($metadata));
             unlink($plain);
@@ -62,7 +71,8 @@ final readonly class BackupStore
         $m = $record['metadata'];
         foreach (['installation_id' => $this->installation, 'workspace_id' => $workspace['id'], 'id' => $backup,
             'instance' => $workspace['instance'], 'host_hash' => $workspace['host_hash'],
-            'catalog_hash' => $workspace['catalog_hash'], 'recipe_hash' => $workspace['recipe_hash']] as $key => $value) {
+            'catalog_hash' => $workspace['catalog_hash'], 'recipe_hash' => $workspace['recipe_hash'],
+            'images_hash' => Json::hash($workspace['resolved_images'] ?? [])] as $key => $value) {
             if (($m[$key] ?? null) !== $value) { throw new Fault('backup_mismatch', 'Backup does not match this workspace and its pinned configuration.'); }
         }
         Files::protectedPath($path . '/payload.enc');

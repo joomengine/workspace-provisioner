@@ -65,6 +65,8 @@ final readonly class Engine
                             $this->runtime->suspend($workspace);
                             $this->state($id, 'suspended', 'suspended');
                         } elseif ($workspace['handed_over']) {
+                            $this->runtime->access($workspace, false);
+                            $this->runtime->start($workspace);
                             $this->ready($id, $workspace);
                         } else {
                             throw new Fault('not_initialized', 'Workspace initialization has not completed.');
@@ -86,14 +88,35 @@ final readonly class Engine
                         } else { $this->ready($id, $workspace); }
                         break;
                     case 'backup':
-                        if (!$workspace['handed_over'] || $workspace['status'] !== 'ready') {
+                        if (!$workspace['handed_over'] || $workspace['desired'] !== 'ready') {
                             throw new Fault('invalid_state', 'A verified running workspace is required for backup.');
                         }
                         $this->runtime->access($workspace, false);
                         $backup = $this->runtime->backup($workspace, $id);
-                        $this->journal->change($id, static function (array &$o, array &$w) use ($backup): void { $w['last_backup'] = $backup; });
+                        $this->journal->change($id, static function (array &$o, array &$w) use ($backup, $id): void {
+                            $w['last_backup'] = $backup;
+                            $w['backups'][$id] = $backup;
+                        });
                         $this->runtime->start($workspace);
                         $this->ready($id, $workspace);
+                        break;
+                    case 'restore':
+                        if (!$workspace['handed_over'] || !isset($workspace['backups'][$op['request']['backup_id']])) {
+                            throw new Fault('invalid_restore', 'The requested backup is not owned by this workspace.');
+                        }
+                        $this->stage($id, 'restoring');
+                        $this->journal->change($id, static function (array &$o, array &$w): void { $w['desired'] = 'suspended'; });
+                        $this->runtime->restore($workspace, $op['request']['backup_id'], $id);
+                        $this->journal->change($id, static function (array &$o, array &$w) use ($id): void { $w['restore_operation'] = $id; });
+                        $workspace['restore_operation'] = $id;
+                        // Imported images remain private until current keys and policy are reapplied.
+                        $this->runtime->access($workspace, false);
+                        $this->runtime->start($workspace);
+                        $this->runtime->handover($workspace);
+                        $this->runtime->replaceKeys($workspace, $workspace['ssh_keys']);
+                        $this->runtime->verify($workspace);
+                        $this->runtime->suspend($workspace);
+                        $this->state($id, 'suspended', 'suspended');
                         break;
                     case 'delete':
                         $this->stage($id, 'deleting');
@@ -182,7 +205,7 @@ final readonly class Engine
 
     private function ready(string $id, array $workspace): void
     {
-        $this->stage($id, 'verifying');
+        $this->stage(id: $id, stage: 'verifying');
         $result = $this->runtime->verify($workspace);
         $this->runtime->access($workspace, true);
         $this->journal->change($id, static function (array &$o, array &$w) use ($result): void {

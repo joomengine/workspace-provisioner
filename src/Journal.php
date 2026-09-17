@@ -65,6 +65,14 @@ final readonly class Journal
                 if ($workspace['status'] === 'deleted' && $r['action'] !== 'delete') {
                     throw new Fault('invalid_state', 'Deleted workspaces cannot be reused.');
                 }
+                if ($r['action'] === 'restore' && (!$workspace['handed_over']
+                    || !in_array($workspace['status'], ['suspended', 'failed'], true)
+                    || !isset($workspace['backups'][$r['backup_id']]))) {
+                    throw new Fault('invalid_restore', 'Restore requires a retained, suspended/failed workspace and its recorded backup.');
+                }
+                if ($r['action'] === 'backup' && (!$workspace['handed_over'] || $workspace['status'] !== 'ready')) {
+                    throw new Fault('invalid_state', 'Create backups only from a verified running workspace.');
+                }
                 foreach ($state['operations'] as $operation) {
                     if ($operation['workspace_id'] === $id && in_array($operation['status'], ['queued', 'running'], true)) {
                         throw new Fault('busy', 'A workspace operation is already pending.');
@@ -145,6 +153,7 @@ final readonly class Journal
         $workspace = $this->workspace($operation['workspace_id']);
         $result['workspace_status'] = $workspace['status'];
         $result['connection'] = $workspace['status'] === 'ready' ? $workspace['result'] : null;
+        $result['last_backup'] = $workspace['last_backup'] ?? null;
         return $result;
     }
 
