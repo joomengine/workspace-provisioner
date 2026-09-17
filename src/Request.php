@@ -24,7 +24,10 @@ final readonly class Request
         } elseif ($action === 'replace-keys') {
             $required[] = 'ssh_keys';
         }
-        Validate::object($data, $required);
+        Validate::object($data, $required, $action === 'restore' ? ['replace_existing'] : []);
+        if (array_key_exists('replace_existing', $data) && !is_bool($data['replace_existing'])) {
+            throw new Fault('invalid_restore', 'Restore replacement must be an explicit boolean.');
+        }
         Validate::integer($data['version'], 1, 1);
         Validate::uuid($data['request_id']);
         Validate::uuid($data['workspace_id']);

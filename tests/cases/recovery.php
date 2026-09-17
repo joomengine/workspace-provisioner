@@ -170,12 +170,46 @@ test('backup failures are retryable and restored keys are applied without republ
         $runtime->calls = [];
         $restore = $journal->submit('operator', new Request($restoreRequest));
         same('succeeded', $engine->tick()['status']);
-        same(['restore', 'close', 'start', 'handover', 'keys', 'verify', 'stop'], $runtime->calls);
+        same(['backup-verify', 'restore', 'close', 'start', 'handover', 'keys', 'verify', 'stop'], $runtime->calls);
         same('suspended', $journal->workspace($request['workspace_id'])['status']);
         same(null, $journal->status('operator', $restore['id'])['connection']);
         $wrong = $restoreRequest; $wrong['request_id'] = Json::uuid(); $wrong['backup_id'] = Json::uuid();
         rejects(fn () => $journal->submit('operator', new Request($wrong)), 'invalid_restore');
         $wrong['backup_id'] = '../../other';
         rejects(fn () => new Request($wrong), 'invalid_id');
+    } finally { cleanRecoveryDirectory($dir); }
+});
+
+test('explicit restore replacement preserves a rollback backup and retries retirement once', function (): void {
+    $dir = sys_get_temp_dir() . '/wp-recovery-' . bin2hex(random_bytes(8));
+    mkdir($dir, 0700);
+    try {
+        Files::write($dir . '/key', bin2hex(random_bytes(32)));
+        $cfg = fixtureConfig($dir);
+        $journal = new Journal(new FileStore($dir . '/state.json'), $cfg);
+        $runtime = new MemoryRuntime();
+        $engine = new Engine($cfg, $journal, $runtime, new Vault($dir, $dir . '/key'));
+        $request = fixtureRequest();
+        $journal->submit('operator', new Request($request));
+        same('succeeded', $engine->tick()['status']);
+        $base = ['version' => 1, 'workspace_id' => $request['workspace_id'], 'tenant' => 'test'];
+        $backup = $journal->submit('operator', new Request($base + ['request_id' => Json::uuid(), 'action' => 'backup']));
+        same('succeeded', $engine->tick()['status']);
+        $journal->submit('operator', new Request($base + ['request_id' => Json::uuid(), 'action' => 'suspend']));
+        same('succeeded', $engine->tick()['status']);
+        same(true, $journal->workspace($request['workspace_id'])['access_stop_confirmed']);
+        $restoreRequest = $base + ['request_id' => Json::uuid(), 'action' => 'restore', 'backup_id' => $backup['id'], 'replace_existing' => true];
+        $bad = $restoreRequest; $bad['replace_existing'] = 'yes';
+        rejects(fn () => new Request($bad), 'invalid_restore');
+        $runtime->calls = [];
+        $restore = $journal->submit('operator', new Request($restoreRequest));
+        $runtime->failure = 'restore';
+        same('failed', $engine->tick()['status']);
+        same(true, $journal->workspace($request['workspace_id'])['backups'][$restore['id']]['encrypted']);
+        $journal->retry('operator', $restore['id']);
+        same('succeeded', $engine->tick()['status']);
+        same(1, count(array_filter($runtime->calls, static fn ($call) => $call === 'backup')));
+        same(1, count(array_filter($runtime->calls, static fn ($call) => $call === 'delete')));
+        same('suspended', $journal->workspace($request['workspace_id'])['status']);
     } finally { cleanRecoveryDirectory($dir); }
 });

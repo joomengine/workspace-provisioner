@@ -224,6 +224,8 @@ final readonly class IncusRuntime implements Runtime
 
     public function suspend(array $workspace): void
     {
+        // A positively confirmed absent VM cannot provide access; API failures still fail closed.
+        if ($this->api($workspace)->find('/1.0/instances', $workspace['instance']) === null) { return; }
         // Stop even when host/network policy has drifted, provided resource ownership still matches.
         $this->power($workspace, false);
     }
@@ -295,6 +297,11 @@ final readonly class IncusRuntime implements Runtime
                 $path, '--instance-only'], '', 3600);
             if ($r['exit'] !== 0) { throw new Fault('backup_failed', 'Private instance export failed.'); }
         });
+    }
+
+    public function verifyBackup(array $workspace, string $backup): void
+    {
+        $this->backups()->metadata($workspace, $backup);
     }
 
     public function restore(array $workspace, string $backup, string $operation): void
