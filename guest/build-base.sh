@@ -9,10 +9,12 @@ source /etc/os-release
 export DEBIAN_FRONTEND=noninteractive
 apt-get update
 apt-get install -y --no-install-recommends docker.io docker-compose-v2 php-cli php-mysql php-pgsql \
-    php-mbstring php-xml php-curl ca-certificates curl jq openssh-client util-linux
+    php-mbstring php-xml php-curl systemd-resolved ca-certificates curl jq openssh-client util-linux
 php -r 'exit(PHP_VERSION_ID >= 80300 && extension_loaded("posix") && extension_loaded("sodium") ? 0 : 1);'
 docker compose version
-systemctl enable docker.service systemd-networkd.service
+systemctl enable docker.service systemd-networkd.service systemd-resolved.service
+systemctl start systemd-resolved.service
+ln -sfn /run/systemd/resolve/stub-resolv.conf /etc/resolv.conf
 systemctl disable --now ssh.service ssh.socket 2>/dev/null || true
 systemctl mask ssh.service ssh.socket
 [[ $(systemctl is-enabled ssh.service || true) == masked ]]
