@@ -1,22 +1,32 @@
 {
-  "name": "joomengine/workspace-provisioner",
-  "description": "Isolated Incus VM provisioning for Joomla Component Builder development workspaces",
-  "type": "project",
-  "license": "Apache-2.0",
-  "require": {
-    "php": ">=8.3",
-    "ext-json": "*",
-    "ext-pdo": "*",
-    "ext-posix": "*",
-    "ext-sodium": "*"
-  },
-  "suggest": {
-    "ext-pdo_pgsql": "Required for the PostgreSQL operation store"
-  },
-  "autoload": {"psr-4": {"JoomEngine\\Workspace\\": "src/"}},
-  "scripts": {
-    "check": "php tools/check.php",
-    "test": "php tests/run.php"
-  },
-  "config": {"allow-plugins": false, "sort-packages": true}
+    "name": "joomengine/workspace-provisioner",
+    "description": "Isolated Incus VM provisioning for Joomla Component Builder development workspaces",
+    "type": "project",
+    "license": "Apache-2.0",
+    "require": {
+        "php": ">=8.3",
+        "ext-json": "*",
+        "ext-pdo": "*",
+        "ext-posix": "*",
+        "ext-sodium": "*"
+    },
+    "suggest": {
+        "ext-pdo_pgsql": "Required for the PostgreSQL operation store"
+    },
+    "autoload": {
+        "psr-4": {
+            "JoomEngine\\Workspace\\": "src/"
+        }
+    },
+    "scripts": {
+        "check": "php tools/check.php",
+        "test": "php tests/run.php"
+    },
+    "config": {
+        "allow-plugins": false,
+        "sort-packages": true
+    },
+    "bin": [
+        "bin/workspace"
+    ]
 }
