@@ -19,5 +19,6 @@ interface Runtime
     public function recipeCheck(array $workspace, array $step): bool;
     public function recipeRun(array $workspace, array $step, string $stdin): void;
     public function backup(array $workspace, string $operation): array;
+    public function verifyBackup(array $workspace, string $backup): void;
     public function restore(array $workspace, string $backup, string $operation): void;
 }

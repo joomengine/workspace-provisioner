@@ -25,6 +25,7 @@ final class MemoryRuntime implements Runtime
     public function recipeCheck(array $w, array $s): bool { return false; }
     public function recipeRun(array $w, array $s, string $stdin): void { $this->call('recipe'); }
     public function backup(array $w, string $o): array { $this->call('backup'); return ['id' => $o, 'encrypted' => true]; }
+    public function verifyBackup(array $w, string $b): void { $this->call('backup-verify'); }
     public function restore(array $w, string $b, string $o): void { $this->call('restore'); }
 }
 

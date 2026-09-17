@@ -106,6 +106,20 @@ final readonly class Engine
                         }
                         $this->stage($id, 'restoring');
                         $this->journal->change($id, static function (array &$o, array &$w): void { $w['desired'] = 'suspended'; });
+                        $this->runtime->verifyBackup($workspace, $op['request']['backup_id']);
+                        if ($op['request']['replace_existing'] ?? false) {
+                            // Explicit replacement saves a rollback point before retiring the owned VM.
+                            // Checkpoints make a lost delete/import response safe to retry.
+                            $this->checkpoint($id, 'restore-safety-backup', function () use ($workspace, $id): void {
+                                $backup = $this->runtime->backup($workspace, $id);
+                                $this->journal->change($id, static function (array &$o, array &$w) use ($backup, $id): void {
+                                    $w['backups'][$id] = $backup;
+                                    $w['last_backup'] = $backup;
+                                    $o['safety_backup_id'] = $id;
+                                });
+                            });
+                            $this->checkpoint($id, 'restore-retire', fn () => $this->runtime->delete($workspace));
+                        }
                         $this->runtime->restore($workspace, $op['request']['backup_id'], $id);
                         $this->journal->change($id, static function (array &$o, array &$w) use ($id): void { $w['restore_operation'] = $id; });
                         $workspace['restore_operation'] = $id;
@@ -224,6 +238,7 @@ final readonly class Engine
     {
         $this->journal->change($id, static function (array &$o, array &$w) use ($status, $desired): void {
             $w['status'] = $status; $w['desired'] = $desired;
+            $w['access_stop_confirmed'] = in_array($status, ['suspended', 'deleted'], true);
         });
     }
 }
