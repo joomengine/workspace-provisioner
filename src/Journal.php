@@ -74,6 +74,13 @@ final readonly class Journal
                     throw new Fault('invalid_state', 'Create backups only from a verified running workspace.');
                 }
                 foreach ($state['operations'] as $operation) {
+                    if ($operation['workspace_id'] === $id && $operation['generation'] === $workspace['generation']
+                        && $operation['action'] === 'create' && $operation['status'] === 'failed'
+                        && (($operation['runtime_tracking'] ?? null) !== 1
+                            || (isset($operation['runtime_intent']) && $operation['runtime_intent']['state'] !== 'settled')
+                            || (isset($operation['cleanup_intent']) && $operation['cleanup_intent']['state'] !== 'settled'))) {
+                        throw new Fault('runtime_outcome_unconfirmed', 'Unresolved initialization cannot be superseded or deleted.');
+                    }
                     if ($operation['workspace_id'] === $id && in_array($operation['status'], ['queued', 'running'], true)) {
                         throw new Fault('busy', 'A workspace operation is already pending.');
                     }
@@ -82,8 +89,9 @@ final readonly class Journal
             $generation = ++$state['workspaces'][$id]['generation'];
             $operationId = Json::uuid();
             $operation = ['id' => $operationId, 'caller' => $caller, 'workspace_id' => $id,
-                'generation' => $generation, 'request_hash' => $request->hash, 'request' => $r, 'action' => $r['action'], 'status' => 'queued',
+                'generation' => $generation, 'attempt' => 0, 'request_hash' => $request->hash, 'request' => $r, 'action' => $r['action'], 'status' => 'queued',
                 'error' => null, 'stage' => 'queued', 'created_at' => gmdate(DATE_ATOM), 'updated_at' => gmdate(DATE_ATOM)];
+            if ($r['action'] === 'create') { $operation['runtime_tracking'] = 1; }
             $state['operations'][$operationId] = $operation;
             $state['requests'][$key] = $operationId;
             return $this->publicOperation($operation);
@@ -145,16 +153,42 @@ final readonly class Journal
             static fn (array $op): bool => in_array($op['status'], ['queued', 'running'], true))));
     }
 
+    public function next(int $now): ?array
+    {
+        return $this->store->transaction(static function (array &$s) use ($now): ?array {
+            $pending = []; $cleanup = [];
+            foreach ($s['operations'] as $op) {
+                if (in_array($op['status'], ['queued', 'running'], true)) { $pending[] = $op; }
+                elseif ($op['action'] === 'create' && $op['status'] === 'failed'
+                    && $s['workspaces'][$op['workspace_id']]['generation'] === $op['generation']
+                    && ($op['cleanup_next_at'] ?? 0) <= $now) { $cleanup[] = $op; }
+            }
+            usort($cleanup, static fn (array $a, array $b): int =>
+                [$a['cleanup_next_at'] ?? 0, $a['created_at'], $a['id']] <=> [$b['cleanup_next_at'] ?? 0, $b['created_at'], $b['id']]);
+            // Durable alternation bounds starvation in both directions, even after a restart
+            // or when slow cleanup is already due again by the time it finishes.
+            if ($pending !== [] && ($cleanup === [] || ($s['last_execution'] ?? '') === 'cleanup')) {
+                $s['last_execution'] = 'operation'; return $pending[0];
+            }
+            if ($cleanup !== []) { $s['last_execution'] = 'cleanup'; return $cleanup[0]; }
+            return null;
+        });
+    }
+
     public function status(string $caller, string $operationId): array
     {
-        $operation = $this->operation($operationId);
-        $this->config->authorize($caller, $operation['request']['tenant'], 'status');
-        $result = $this->publicOperation($operation);
-        $workspace = $this->workspace($operation['workspace_id']);
-        $result['workspace_status'] = $workspace['status'];
-        $result['connection'] = $workspace['status'] === 'ready' ? $workspace['result'] : null;
-        $result['last_backup'] = $workspace['last_backup'] ?? null;
-        return $result;
+        Validate::uuid($operationId);
+        return $this->store->transaction(function (array &$s) use ($caller, $operationId): array {
+            $operation = $s['operations'][$operationId] ?? throw new Fault('not_found', 'Operation not found.');
+            $this->config->authorize($caller, $operation['request']['tenant'], 'status');
+            $result = $this->publicOperation($operation);
+            $workspace = $s['workspaces'][$operation['workspace_id']];
+            $result['workspace_status'] = $workspace['status'];
+            $result['workspace_generation'] = $workspace['generation'];
+            $result['connection'] = $workspace['status'] === 'ready' ? $workspace['result'] : null;
+            $result['last_backup'] = $workspace['last_backup'] ?? null;
+            return $result;
+        });
     }
 
     public function retry(string $caller, string $operationId): array
@@ -169,6 +203,13 @@ final readonly class Journal
                 throw new Fault('stale_operation', 'A later operation superseded this request.');
             }
             if ($op['status'] !== 'failed') { throw new Fault('invalid_state', 'Only failed operations can be retried.'); }
+            if ($op['action'] === 'create' && ($op['runtime_tracking'] ?? null) !== 1) {
+                throw new Fault('runtime_outcome_unconfirmed', 'Legacy initialization needs explicit operator resolution.');
+            }
+            if ((isset($op['runtime_intent']) && $op['runtime_intent']['state'] !== 'settled')
+                || (isset($op['cleanup_intent']) && $op['cleanup_intent']['state'] !== 'settled')) {
+                throw new Fault('runtime_outcome_unconfirmed', 'Resolve the recorded physical operation before retrying initialization.');
+            }
             foreach ($s['operations'] as $other) {
                 if ($other['workspace_id'] === $op['workspace_id'] && $other['id'] !== $op['id']
                     && in_array($other['status'], ['queued', 'running'], true)) {
@@ -176,13 +217,18 @@ final readonly class Journal
                 }
             }
             $op['status'] = 'queued';
+            $op['attempt'] = ($op['attempt'] ?? 0) + 1;
             $op['error'] = null;
+            $op['updated_at'] = gmdate(DATE_ATOM);
+            $s['workspaces'][$op['workspace_id']]['access_stop_confirmed'] = false;
+            unset($op['stop_observation']);
             return $this->publicOperation($op);
         });
     }
 
     private function publicOperation(array $op): array
     {
-        return array_intersect_key($op, array_flip(['id', 'workspace_id', 'action', 'status', 'stage', 'error', 'created_at', 'updated_at']));
+        return array_intersect_key($op, array_flip(['id', 'workspace_id', 'generation', 'action', 'status', 'stage', 'error', 'created_at', 'updated_at']))
+            + ['attempt' => $op['attempt'] ?? 0];
     }
 }

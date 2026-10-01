@@ -4,7 +4,7 @@ declare(strict_types=1);
 
 use JoomEngine\Workspace\{Engine, Fault, Files, FileStore, Journal, Json, Runtime, Request, Vault};
 
-final class MemoryRuntime implements Runtime
+class MemoryRuntime implements Runtime
 {
     public array $calls = [];
     public ?string $failure = null;
@@ -15,11 +15,15 @@ final class MemoryRuntime implements Runtime
     public function ensure(array $w, callable $observe): void { $this->call('ensure'); }
     public function prepare(array $w, array $c): void { $this->call('prepare'); }
     public function initialize(array $w): void { $this->call('initialize'); }
-    public function start(array $w): void { $this->call('start'); }
+    public function start(array $w, ?callable $observe = null): void { $this->call('start'); }
     public function verify(array $w): array { $this->call('verify'); return ['exposure' => 'private']; }
     public function handover(array $w): void { $this->call('handover'); }
     public function access(array $w, bool $enabled): void { $this->call($enabled ? 'open' : 'close'); }
-    public function suspend(array $w): void { $this->call('stop'); }
+    public function suspend(array $w, ?callable $observe = null): void { $this->call('stop'); }
+    public function observe(array $w, ?array $intent = null, ?array $cleanupIntent = null): array
+    {
+        return ['state' => 'stopped', 'error' => null, 'intent_settled' => true, 'cleanup_settled' => true];
+    }
     public function delete(array $w): void { $this->call('delete'); }
     public function replaceKeys(array $w, array $keys): void { $this->call('keys'); }
     public function recipeCheck(array $w, array $s): bool { return false; }

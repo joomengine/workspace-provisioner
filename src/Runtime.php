@@ -9,11 +9,13 @@ interface Runtime
     public function ensure(array $workspace, callable $observe): void;
     public function prepare(array $workspace, array $credentials): void;
     public function initialize(array $workspace): void;
-    public function start(array $workspace): void;
+    public function start(array $workspace, ?callable $observe = null): void;
     public function verify(array $workspace): array;
     public function handover(array $workspace): void;
     public function access(array $workspace, bool $enabled): void;
-    public function suspend(array $workspace): void;
+    public function suspend(array $workspace, ?callable $observe = null): void;
+    /** Fresh physical state only; an unresolved create/start intent must remain unknown. */
+    public function observe(array $workspace, ?array $intent = null, ?array $cleanupIntent = null): array;
     public function delete(array $workspace): void;
     public function replaceKeys(array $workspace, array $keys): void;
     public function recipeCheck(array $workspace, array $step): bool;
