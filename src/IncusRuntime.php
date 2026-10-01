@@ -83,21 +83,32 @@ final readonly class IncusRuntime implements Runtime
             if (($image['type'] ?? '') !== 'virtual-machine' || ($image['properties']['wp.template.version'] ?? '') !== '1') {
                 throw new Fault('unqualified_image', 'Select an image produced by the workspace VM builder.');
             }
-            $api->mutate('POST', '/1.0/instances', ['name' => $workspace['instance'],
+            $this->mutation($api, 'POST', '/1.0/instances', ['name' => $workspace['instance'],
                 ...$this->definition($workspace, false),
-                'source' => ['type' => 'image', 'fingerprint' => $this->catalog($workspace)['vm_image']]], $observe);
+                'source' => ['type' => 'image', 'fingerprint' => $this->catalog($workspace)['vm_image']]], 'create', $observe);
         }
         $this->instance($workspace);
-        $this->power($workspace, true);
+        $this->power($workspace, true, $observe);
         $this->awaitAgent($workspace);
     }
 
-    private function power(array $w, bool $running): void
+    /** Persist the intent before transport: a missing reply is not evidence of rejection. */
+    private function mutation(IncusApi $api, string $method, string $path, array $body, string $kind, ?callable $observe): void
+    {
+        if ($observe !== null) { $observe(['kind' => $kind, 'state' => 'pending', 'operation' => null]); }
+        $api->mutate($method, $path, $body, $observe === null ? null : static function (string $operation) use ($observe, $kind): void {
+            $observe(['kind' => $kind, 'state' => 'accepted', 'operation' => $operation]);
+        });
+        if ($observe !== null) { $observe(['kind' => $kind, 'state' => 'settled', 'operation' => null]); }
+    }
+
+    private function power(array $w, bool $running, ?callable $observe = null): void
     {
         $instance = $this->instance($w, false);
         if (($instance['status'] ?? '') !== ($running ? 'Running' : 'Stopped')) {
-            $this->api($w)->mutate('PUT', $this->path($w) . '/state',
-                ['action' => $running ? 'start' : 'stop', 'timeout' => 30, 'force' => !$running]);
+            $this->mutation($this->api($w), 'PUT', $this->path($w) . '/state',
+                ['action' => $running ? 'start' : 'stop', 'timeout' => 30, 'force' => !$running],
+                $running ? 'start' : 'stop', $observe);
         }
         if (($this->instance($w, false)['status'] ?? '') !== ($running ? 'Running' : 'Stopped')) {
             throw new Fault('power_state_failed', 'Workspace did not reach the required power state.');
@@ -186,10 +197,10 @@ final readonly class IncusRuntime implements Runtime
         }
     }
 
-    public function start(array $workspace): void
+    public function start(array $workspace, ?callable $observe = null): void
     {
         $this->instance($workspace);
-        $this->power($workspace, true);
+        $this->power($workspace, true, $observe);
         $this->awaitAgent($workspace);
         $this->helper($workspace, 'start');
     }
@@ -222,12 +233,77 @@ final readonly class IncusRuntime implements Runtime
         $this->instance($workspace);
     }
 
-    public function suspend(array $workspace): void
+    public function suspend(array $workspace, ?callable $observe = null): void
     {
         // A positively confirmed absent VM cannot provide access; API failures still fail closed.
         if ($this->api($workspace)->find('/1.0/instances', $workspace['instance']) === null) { return; }
         // Stop even when host/network policy has drifted, provided resource ownership still matches.
-        $this->power($workspace, false);
+        $this->power($workspace, false, $observe);
+    }
+
+    public function observe(array $workspace, ?array $intent = null, ?array $cleanupIntent = null): array
+    {
+        $api = $this->api($workspace);
+        $settled = []; $error = null;
+        foreach (['intent_settled' => $intent, 'cleanup_settled' => $cleanupIntent] as $name => $effect) {
+            try { $this->settledIntent($api, $effect); $settled[$name] = true; }
+            catch (\Throwable $failure) {
+                $settled[$name] = false;
+                $error ??= $failure instanceof Fault ? $failure->reason : 'runtime_observation_failed';
+            }
+        }
+        if ($error !== null) { return ['state' => 'unknown', 'error' => $error, ...$settled]; }
+        // A stopped snapshot must not conceal a create/start/stop still executing remotely.
+        $this->quiescent($workspace);
+        $instance = $api->find('/1.0/instances', $workspace['instance']);
+        $state = 'absent';
+        if ($instance !== null) {
+            IncusApi::owned($instance, $this->config->data['installation_id'], $workspace['id']);
+            $power = $api->get($this->path($workspace) . '/state');
+            $state = match ($power['status_code'] ?? null) { 102 => 'stopped', 103 => 'running', default => 'unknown' };
+            // Check ownership again after the power read, rather than trust a name alone.
+            $this->instance($workspace, false);
+        }
+        $this->quiescent($workspace);
+        return ['state' => $state, 'error' => $state === 'unknown' ? 'runtime_state_unconfirmed' : null,
+            'intent_settled' => true, 'cleanup_settled' => true];
+    }
+
+    private function settledIntent(IncusApi $api, ?array $intent): void
+    {
+        if ($intent === null || ($intent['state'] ?? null) === 'settled') { return; }
+        if (($intent['state'] ?? null) !== 'accepted' || !is_string($intent['operation'] ?? null)
+            || !preg_match('~^/1\.0/operations/[0-9a-f-]{36}$~D', $intent['operation'])) {
+            throw new Fault('runtime_outcome_unconfirmed', 'A physical request has no acknowledged outcome.');
+        }
+        if (!in_array($api->get($intent['operation'])['status_code'] ?? null, [200, 400, 401], true)) {
+            throw new Fault('runtime_operation_pending', 'An acknowledged physical operation remains unresolved.');
+        }
+    }
+
+    private function quiescent(array $workspace): void
+    {
+        $groups = $this->api($workspace)->get('/1.0/operations?recursion=1');
+        if (!is_array($groups)) { throw new Fault('invalid_incus_response', 'Expected operation groups.'); }
+        foreach ($groups as $operations) {
+            if (!is_array($operations) || !array_is_list($operations)) { throw new Fault('invalid_incus_response', 'Expected operation list.'); }
+            foreach ($operations as $operation) {
+                if (!is_array($operation) || !is_int($operation['status_code'] ?? null)) {
+                    throw new Fault('invalid_incus_response', 'Expected operation state.');
+                }
+                if (in_array($operation['status_code'], [200, 400, 401], true)) { continue; }
+                $resources = $operation['resources']['instances'] ?? null;
+                if (!is_array($resources) || !array_is_list($resources)) {
+                    throw new Fault('runtime_operation_unclassified', 'A physical operation cannot be safely classified.');
+                }
+                foreach ($resources as $resource) {
+                    if (!is_string($resource)) { throw new Fault('invalid_incus_response', 'Expected instance operation resources.'); }
+                    if (parse_url($resource, PHP_URL_PATH) === $this->path($workspace)) {
+                        throw new Fault('runtime_operation_pending', 'A workspace operation is still executing.');
+                    }
+                }
+            }
+        }
     }
 
     public function delete(array $workspace): void

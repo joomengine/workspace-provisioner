@@ -4,6 +4,8 @@ A complete runtime, its automated tests, and a deployed infrastructure acceptanc
 
 ## Automated checks
 
+The [failed-initialization contract](failed-initialization.md) adds simulated durable cleanup and fresh physical-state evidence tests. Its real-host lost-reply, worker-death, session-stop and retained-data checks remain unrun until explicitly exercised in the isolated lab; unacknowledged physical mutations stay an operator-resolution gate.
+
 `php tools/check.php` validates PHP syntax/JSON and `php tests/run.php` runs deterministic unit and contract tests. `php tests/postgres.php` tests the state store against the disposable database documented in [development](development.md). `WP_RUN_CONTAINER_TESTS=1 bash tests/container.sh` installs actual Joomla/JCB and exercises restricted SSH/SFTP, shared files, matching PHP, private Composer inputs, restarts and workload settings on an isolated Docker host. It never runs against a production daemon.
 
 `bash tests/package.sh` requires Composer and verifies two independently built archives, checksums, generated autoload files/schemas and the extracted CLI. Hosted package CI runs these checks and publishes a candidate artifact. Stable package publication runs after merge and its automated checks as described in [releases](releases.md). There is no required external check-emitting App or lab-dispatch service.

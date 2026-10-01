@@ -109,7 +109,7 @@ HELP;
         'host:preflight' => $application->host->preflight($o['host']),
         'host:prepare' => $application->store->exclusive(fn () => $application->host->prepare($o['host'], $o['confirm'])),
         'submit' => $application->submit($o['caller'], Json::decode(stream_get_contents(STDIN, 8388609))),
-        'status' => $application->journal->status($o['caller'], $o['operation']),
+        'status' => $application->status($o['caller'], $o['operation']),
         'retry' => $application->journal->retry($o['caller'], $o['operation']),
         default => null,
     };

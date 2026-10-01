@@ -36,6 +36,8 @@ The generated unit grants write access only to state/credential/backup directori
 
 ## Suspend, recover, delete and update
 
+For failed creation, use the [failed-initialization cleanup and fresh stop contract](failed-initialization.md) to preserve the original retry identity. Journal failure alone is not proof of physical suspension.
+
 Use the same request interface for verify/reconcile, suspend/resume, SSH key replacement, encrypted backup, restore and deletion. Reconciliation of a retained ready workspace restarts and verifies it without rerunning installation. Guests deliberately have `boot.autostart=false`: following a compute-host restart, run reconciliation for retained ready workspaces rather than automatically starting suspended guests. Store operation IDs in the calling service and submit explicit lifecycle requests; no hidden billing scheduler exists in this package.
 
 Suspension stops the actual VM, terminating existing sessions. Replacement keys restart the development service. A restore finishes suspended and needs a separate resume. [Recovery](recovery.md) describes absent-VM and explicit replacement paths. Deletion removes only the recorded owned VM and credentials; retained encrypted backups remain under the operator's separate retention policy, and retired names/addresses are not silently reused.

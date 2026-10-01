@@ -21,9 +21,16 @@ final readonly class IncusApi
 
     public function find(string $collection, string $name): ?array
     {
-        foreach ($this->get($collection) as $url) {
+        $resources = $this->get($collection);
+        if (!is_array($resources) || !array_is_list($resources)) {
+            throw new Fault('invalid_incus_response', 'Expected an Incus resource URL list.');
+        }
+        foreach ($resources as $url) {
             if (!is_string($url)) { throw new Fault('invalid_incus_response', 'Expected an Incus resource URL list.'); }
             $path = parse_url($url, PHP_URL_PATH);
+            if (!is_string($path) || dirname($path) !== $collection) {
+                throw new Fault('invalid_incus_response', 'Unexpected Incus resource URL.');
+            }
             if (is_string($path) && rawurldecode(basename($path)) === $name) {
                 return $this->get($collection . '/' . rawurlencode($name));
             }
@@ -34,7 +41,8 @@ final readonly class IncusApi
     public function mutate(string $method, string $path, ?array $body = null, ?callable $observe = null): void
     {
         $response = $this->transport->request($this->remote, $this->project, $method, $path, $body);
-        if (($response['type'] ?? '') !== 'async') { return; }
+        if (($response['type'] ?? '') === 'sync') { return; }
+        if (($response['type'] ?? '') !== 'async') { throw new Fault('invalid_incus_response', 'Expected a synchronous result or asynchronous operation.'); }
         $operation = $response['operation'] ?? '';
         if (!is_string($operation) || !preg_match('~^/1\.0/operations/[0-9a-f-]{36}$~D', $operation)) {
             throw new Fault('invalid_incus_response', 'Missing asynchronous operation identifier.');

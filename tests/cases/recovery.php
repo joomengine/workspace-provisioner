@@ -5,7 +5,7 @@ declare(strict_types=1);
 use JoomEngine\Workspace\{BackupStore, Engine, Fault, Files, FileStore, Host, IncusRuntime, IncusTransport, Journal, Json, Request, Vault};
 
 /** An API contract simulator, deliberately not evidence of real VM isolation. */
-final class RecoveryTransport implements IncusTransport
+class RecoveryTransport implements IncusTransport
 {
     public array $resources = [];
     public array $calls = [];

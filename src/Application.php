@@ -39,4 +39,9 @@ final readonly class Application
         if ($w['status'] !== 'ready') { throw new Fault('not_ready', 'Credentials can only be retrieved for a ready workspace.'); }
         return $this->vault->reveal($workspace);
     }
+
+    public function status(string $caller, string $operation): array
+    {
+        return $this->engine->status($caller, $operation);
+    }
 }
