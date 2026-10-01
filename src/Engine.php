@@ -180,25 +180,64 @@ final readonly class Engine
     }
 
     /** Read-through evidence, never a cached cleanup flag or an infrastructure mutation. */
+    /** A status read never drives reconciliation, cleanup, start or any other mutation. */
     public function status(string $caller, string $id): array
     {
         $result = $this->journal->status($caller, $id);
-        if ($result['action'] !== 'create' || $result['status'] !== 'failed') { return $result; }
+        $failedCreate = $result['action'] === 'create' && $result['status'] === 'failed';
         try {
-            return $this->journal->store->exclusive(function () use ($caller, $id): array {
+            return $this->journal->store->exclusive(function () use ($caller, $id, $failedCreate): array {
                 $op = $this->journal->operation($id);
                 $w = $this->journal->workspace($op['workspace_id']);
-                $observation = $this->observeCreate($op, $w);
+                $observation = $failedCreate ? $this->observeCreate($op, $w) : $this->observeRuntime($op, $w);
                 $result = $this->journal->status($caller, $id);
-                if ($result['status'] !== 'failed' || $result['workspace_generation'] !== $op['generation']
-                    || $result['attempt'] !== ($op['attempt'] ?? 0)) {
+                if ($result['status'] !== $op['status'] || $result['workspace_generation'] !== $op['generation']
+                    || $result['attempt'] !== ($op['attempt'] ?? 0)
+                    || ($failedCreate && $result['status'] !== 'failed')) {
                     $observation = ['state' => 'unknown', 'error' => 'observation_superseded'];
                 }
-                return $result + ['stop_observation' => $this->evidence($op, $observation)];
+                $result['runtime_observation'] = $this->runtimeEvidence($op, $w, $observation);
+                if ($failedCreate) { $result['stop_observation'] = $this->evidence($op, $observation); }
+                return $result;
             });
         } catch (Fault $error) {
             if ($error->reason !== 'busy') { throw $error; }
-            return $result + ['stop_observation' => $this->evidence($result, ['state' => 'unknown', 'error' => 'executor_busy'])];
+            $unknown = ['state' => 'unknown', 'error' => 'executor_busy'];
+            $op = $this->journal->operation($id);
+            $w = $this->journal->workspace($op['workspace_id']);
+            $result['runtime_observation'] = $this->runtimeEvidence($op, $w, $unknown);
+            if ($failedCreate) { $result['stop_observation'] = $this->evidence($result, $unknown); }
+            return $result;
+        }
+    }
+
+    private function runtimeEvidence(array $op, array $w, array $observation): array
+    {
+        $state = $observation['state'] ?? 'unknown';
+        if (!in_array($state, ['running', 'stopped', 'absent'], true)
+            || ($observation['error'] ?? null) !== null
+            || ($observation['intent_settled'] ?? false) !== true
+            || ($observation['cleanup_settled'] ?? false) !== true) { $state = 'unknown'; }
+        return ['version' => 1, 'installation_id' => $this->config->data['installation_id'],
+            'native_host' => $w['host'], 'tenant' => $w['tenant'], 'workspace_id' => $w['id'],
+            'operation_id' => $op['id'], 'request_id' => $op['request']['request_id'],
+            'generation' => $op['generation'], 'attempt' => $op['attempt'] ?? 0,
+            'state' => $state, 'observed_at' => gmdate(DATE_ATOM)];
+    }
+
+    private function observeRuntime(array $op, array $w): array
+    {
+        try {
+            if ($w['generation'] !== $op['generation'] || $op['status'] !== 'succeeded') {
+                throw new Fault('observation_superseded', 'Only a completed current operation can supply runtime evidence.');
+            }
+            $this->sameHost($w);
+            if ($op['action'] === 'create' && ($op['runtime_tracking'] ?? null) !== 1) {
+                throw new Fault('runtime_outcome_unconfirmed', 'Legacy initialization has no complete physical-intent record.');
+            }
+            return $this->runtime->observe($w, $op['runtime_intent'] ?? null, $op['cleanup_intent'] ?? null);
+        } catch (\Throwable) {
+            return ['state' => 'unknown', 'error' => 'runtime_observation_unconfirmed'];
         }
     }
 
