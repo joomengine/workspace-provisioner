@@ -31,7 +31,7 @@ jobs:
           git archive --format=tar --prefix=workspace-provisioner/ HEAD | gzip -n > "$RUNNER_TEMP/source-package/workspace-provisioner.tar.gz"
           cd "$RUNNER_TEMP/source-package"
           sha256sum workspace-provisioner.tar.gz > SHA256SUMS
-      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a
+      - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9
         with:
           name: workspace-provisioner-source-${{ github.sha }}
           path: ${{ runner.temp }}/source-package/
